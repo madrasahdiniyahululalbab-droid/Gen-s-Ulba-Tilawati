@@ -640,25 +640,30 @@ async function loadAllData(){
     storageGet('room-quota'),
   ]);
 
+  // PENTING: kalau pengambilan data gagal/kosong (jaringan bermasalah, dll),
+  // JANGAN langsung menimpa Google Sheets dengan data kosong bawaan (seed) —
+  // itu bisa menghapus data asli yang sudah diisi admin. Data seed hanya
+  // dipakai untuk TAMPILAN di memori; baru benar-benar ditulis ke Sheets
+  // saat admin melakukan edit sungguhan (lewat safeListUpdate), atau saat
+  // memang belum ada Google Sheets sama sekali (mode lokal/localStorage).
   if(siswa && siswa.length){
     state.siswaList = siswa;
   }else{
     state.siswaList = SEED_SISWA.slice();
-    storageSet('siswa-list', state.siswaList);
+    if(!hasSheetsApi()) storageSet('siswa-list', state.siswaList);
   }
 
   if(guru && guru.length){
     state.guruList = guru;
   }else{
     state.guruList = SEED_GURU.slice();
-    storageSet('guru-list', state.guruList);
+    if(!hasSheetsApi()) storageSet('guru-list', state.guruList);
   }
 
   if(quota){
     state.roomQuota = quota;
   }else{
     state.roomQuota = {};
-    storageSet('room-quota', state.roomQuota);
   }
 
   // Penilaian disimpan 1 key per catatan (bukan 1 array besar) supaya aman
@@ -737,7 +742,9 @@ function getQuotaForRoom(roomName){
 // Build room assignment for one Tilawati level.
 // Returns { rooms: [{room, guru, quota, students:[]}], leftover: [students without a room] }
 // Students with a manual room override (s.roomOverride) are placed into that room
-// first regardless of quota order, so admin can move students to a less-full room.
+// first regardless of quota order — the override can be ANY room in the school,
+// not just rooms normally used for this level, so admin can freely move a student
+// (e.g. put a Tilawati 1 student into room 5A).
 function assignRooms(levelLabel){
   const level = LEVELS.find(l=>l.label === levelLabel);
   if(!level) return {rooms:[], leftover:[]};
@@ -749,17 +756,28 @@ function assignRooms(levelLabel){
     room:r, guru:getGuruForRoom(r), quota:getQuotaForRoom(r), students:[]
   }));
 
+  // Manual overrides can point to any room in the school, including rooms not
+  // normally used for this level — add those as extra buckets so they show up too.
+  const manualRoomsOutside = [...new Set(
+    studentsInLevel.filter(s=>s.roomOverride && !rooms.includes(s.roomOverride)).map(s=>s.roomOverride)
+  )];
+  manualRoomsOutside.forEach(r=>{
+    roomBuckets.push({room:r, guru:getGuruForRoom(r), quota:getQuotaForRoom(r), students:[]});
+  });
+
   // Pass 1: manual overrides go straight into their chosen room (even if it goes over quota)
-  const manual = studentsInLevel.filter(s=>s.roomOverride && rooms.includes(s.roomOverride));
+  const manual = studentsInLevel.filter(s=>s.roomOverride);
   manual.forEach(s=>{
     const bucket = roomBuckets.find(b=>b.room === s.roomOverride);
     if(bucket) bucket.students.push(s);
   });
 
-  // Pass 2: remaining students auto-fill rooms with spare capacity, in order
-  const remaining = studentsInLevel.filter(s=>!(s.roomOverride && rooms.includes(s.roomOverride)));
+  // Pass 2: remaining students (no override) auto-fill the level's normal rooms
+  // with spare capacity, in order. Extra manual-only rooms are not auto-filled.
+  const remaining = studentsInLevel.filter(s=>!s.roomOverride);
   let idx = 0;
   for(const bucket of roomBuckets){
+    if(!rooms.includes(bucket.room)) continue;
     while(bucket.students.length < bucket.quota && idx < remaining.length){
       bucket.students.push(remaining[idx]);
       idx++;
@@ -860,14 +878,13 @@ function renderSiswaPage(){
   const pageItems = filtered.slice(start, start+state.siswaPageSize);
 
   const levelOptions = LEVEL_LABELS.map(l=>`<option value="${l}">${l}</option>`).join('');
+  const allRooms = allDistinctRooms();
 
   const rows = pageItems.map(s=>{
-    const level = LEVELS.find(l=>l.label === s.tilawati);
-    const roomsForLevel = level ? getRoomsForLevel(level.kode) : [];
     const roomCell = s.tilawati
-      ? `<select class="siswa-ruangan" style="width:130px;" ${roomsForLevel.length?'':'disabled'}>
+      ? `<select class="siswa-ruangan" style="width:130px;" ${allRooms.length?'':'disabled'}>
           <option value="">Otomatis</option>
-          ${roomsForLevel.map(r=>`<option value="${escapeAttr(r)}" ${s.roomOverride===r?'selected':''}>${escapeHtml(r)}</option>`).join('')}
+          ${allRooms.map(r=>`<option value="${escapeAttr(r)}" ${s.roomOverride===r?'selected':''}>${escapeHtml(r)}</option>`).join('')}
         </select>`
       : `<span style="font-size:11.5px; color:var(--ink-muted);">— isi Tilawati dulu —</span>`;
     return `
@@ -1374,6 +1391,7 @@ function renderRiwayatPage(){
       <td><span class="pill ${r.hasil.startsWith('Naik')?'pill-teal':'pill-gray'}">${escapeHtml(r.hasil)}</span></td>
       <td>${r.nilaiAkhir ?? '-'}</td>
       <td>${escapeHtml(r.penguji)}</td>
+      <td><button class="btn btn-sm riwayat-print" data-id="${r.id}">Cetak</button></td>
     </tr>
   `).join('');
 
@@ -1385,8 +1403,8 @@ function renderRiwayatPage(){
       </div>
       <div class="table-scroll">
         <table class="data-table">
-          <thead><tr><th>Tanggal</th><th>Nama Siswa</th><th>Kelas</th><th>Tingkat Diuji</th><th>Hasil</th><th>Nilai</th><th>Penguji</th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="7"><div class="empty-state">Belum ada riwayat penilaian.</div></td></tr>`}</tbody>
+          <thead><tr><th>Tanggal</th><th>Nama Siswa</th><th>Kelas</th><th>Tingkat Diuji</th><th>Hasil</th><th>Nilai</th><th>Penguji</th><th style="width:70px;"></th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="8"><div class="empty-state">Belum ada riwayat penilaian.</div></td></tr>`}</tbody>
         </table>
       </div>
     </div>
@@ -1400,6 +1418,108 @@ function bindRiwayatEvents(){
     const el = document.getElementById('riwayatSearch');
     el.focus(); el.selectionStart = el.selectionEnd = el.value.length;
   });
+  document.querySelectorAll('.riwayat-print').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const record = state.penilaianList.find(r=>r.id===btn.getAttribute('data-id'));
+      if(record) printBlankoPenilaian(record);
+    });
+  });
+}
+
+/* ======================= CETAK BLANKO PENILAIAN (A4, sesuai template resmi) =======================
+   Mencetak HANYA bagian tingkat Tilawati yang diuji siswa tersebut - bukan seluruh
+   tingkatan template - dengan nama, materi, status, dan nilai terisi dari hasil uji. */
+function printBlankoPenilaian(record){
+  const rows = record.materi.map(m=>{
+    const lancar = m.status === 'Lancar' ? '&#10003;' : '';
+    const kurang = m.status === 'Kurang Lancar' ? '&#10003;' : '';
+    const tidak = m.status === 'Tidak Lancar' ? '&#10003;' : '';
+    return `
+      <tr>
+        <td class="materi-cell">${escapeHtml(m.nama)}</td>
+        <td class="center">${lancar}</td>
+        <td class="center">${kurang}</td>
+        <td class="center">${tidak}</td>
+        <td class="center">${escapeHtml(String(m.nilai ?? ''))}</td>
+      </tr>`;
+  }).join('');
+
+  const catatanLines = (record.catatan || '').split('\n');
+  while(catatanLines.length < 3) catatanLines.push('');
+  const catatanHtml = catatanLines.slice(0,3).map(line=>
+    `<div class="catatan-line">${escapeHtml(line)}${'.'.repeat(Math.max(0, 90 - line.length))}</div>`
+  ).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<title>Blanko Penilaian Tilawati - ${escapeHtml(record.siswaNama)}</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  body{ font-family: 'Times New Roman', Times, serif; color:#000; margin:0; }
+  .header{ text-align:center; font-weight:bold; font-size:16px; text-transform:uppercase; margin-bottom:14px; position:relative; }
+  .header img{ position:absolute; right:0; top:-6px; width:56px; height:56px; object-fit:contain; }
+  .meta{ margin-bottom:10px; font-size:13.5px; }
+  .meta div{ margin-bottom:2px; }
+  .meta .label{ display:inline-block; width:110px; }
+  table.blanko{ width:100%; border-collapse:collapse; font-size:13px; margin-bottom:10px; }
+  table.blanko th, table.blanko td{ border:1px solid #000; padding:5px 8px; }
+  table.blanko th{ text-align:center; font-weight:bold; }
+  .materi-cell{ text-align:left; }
+  .center{ text-align:center; }
+  .nilai-akhir-row td{ font-weight:bold; text-align:center; font-size:14px; padding:8px; }
+  .nilai-akhir-label{ text-align:right !important; }
+  .keterangan{ font-size:11.5px; display:flex; justify-content:space-between; margin-top:6px; }
+  .catatan{ font-size:12.5px; margin-top:10px; }
+  .catatan-line{ border-bottom:1px dotted #000; overflow:hidden; white-space:nowrap; height:18px; }
+  .signature{ margin-top:6px; text-align:right; font-size:13px; }
+  .signature .name{ margin-top:48px; font-weight:bold; text-decoration:underline; }
+  @media print{ .no-print{ display:none; } }
+</style>
+</head>
+<body>
+  <div class="header">
+    BLANKO PENILAIAN TILAWATI
+    <img src="${LOGO1_DATA}" alt="Logo">
+  </div>
+  <div class="meta">
+    <div><span class="label">NAMA SISWA</span>: ${escapeHtml(record.siswaNama)}</div>
+    <div><span class="label">TILAWATI</span>: ${escapeHtml(record.tingkatSaat.replace('Tilawati ',''))}</div>
+  </div>
+  <table class="blanko">
+    <thead>
+      <tr><th style="width:38%;">MATERI</th><th>LANCAR</th><th>KURANG LANCAR</th><th>TIDAK LANCAR</th><th>NILAI</th></tr>
+    </thead>
+    <tbody>
+      ${rows}
+      <tr class="nilai-akhir-row">
+        <td colspan="4" class="nilai-akhir-label" style="text-align:right;">NILAI AKHIR</td>
+        <td>${record.nilaiAkhir ?? ''}</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="keterangan">
+    <span>Keterangan nilai : lancar = 95 - 85, kurang lancar = 84 - 75, tidak lancar = 74 - 65</span>
+    <span>Jember, ${escapeHtml(record.tanggal)}</span>
+  </div>
+  <div class="catatan">
+    <div>Catatan:</div>
+    ${catatanHtml}
+  </div>
+  <div class="signature">
+    Penguji<br>
+    <span class="name">${escapeHtml(record.penguji)}</span>
+  </div>
+</body>
+</html>`;
+
+  const w = window.open('', '_blank', 'width=900,height=1100');
+  if(!w){ showAlert('Popup diblokir browser. Izinkan popup untuk mencetak.'); return; }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  w.onload = () => { w.focus(); w.print(); };
 }
 
 /* ======================= CETAK LAPORAN ======================= */
