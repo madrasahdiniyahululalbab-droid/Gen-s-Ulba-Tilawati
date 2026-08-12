@@ -126,6 +126,30 @@
   #topbar p{margin:2px 0 0; color:var(--ink-muted); font-size:12.5px;}
   #content{padding:26px 32px 60px; flex:1;}
 
+  /* ---------- Animasi transisi buka halaman/kartu ---------- */
+  @keyframes pageFadeSlideIn{
+    from{ opacity:0; transform:translateY(10px); }
+    to{ opacity:1; transform:translateY(0); }
+  }
+  #content.page-enter{ animation:pageFadeSlideIn 0.32s ease both; }
+  #content.page-enter .card,
+  #content.page-enter .level-tabs,
+  #content.page-enter .dashboard-tile,
+  #content.page-enter > div{
+    animation:pageFadeSlideIn 0.36s ease both;
+  }
+  #content.page-enter .card:nth-of-type(2),
+  #content.page-enter .dashboard-tile:nth-of-type(2){ animation-delay:0.04s; }
+  #content.page-enter .card:nth-of-type(3),
+  #content.page-enter .dashboard-tile:nth-of-type(3){ animation-delay:0.08s; }
+  #content.page-enter .card:nth-of-type(4),
+  #content.page-enter .dashboard-tile:nth-of-type(4){ animation-delay:0.12s; }
+  #content.page-enter .card:nth-of-type(5),
+  #content.page-enter .dashboard-tile:nth-of-type(5){ animation-delay:0.16s; }
+  @media (prefers-reduced-motion: reduce){
+    #content.page-enter, #content.page-enter *{ animation:none !important; }
+  }
+
   .save-badge{
     font-size:11.5px;
     color:var(--ink-muted);
@@ -268,7 +292,7 @@
 
   /* ---------- Login screen ---------- */
   #loginScreen{
-    min-height:100vh; display:flex; align-items:center; justify-content:center;
+    min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:30px;
     background-image:
       linear-gradient(160deg, rgba(29,95,163,0.88) 0%, rgba(74,144,217,0.80) 55%, rgba(230,241,252,0.55) 100%),
       var(--login-bg-image, none);
@@ -277,6 +301,10 @@
     background-blend-mode:normal;
     padding:20px;
   }
+  .login-hero{ text-align:center; color:#fff; text-shadow:0 3px 14px rgba(0,0,0,0.35); }
+  .login-hero-eyebrow{ font-size:13px; letter-spacing:5px; font-weight:700; opacity:0.9; margin-bottom:8px; text-transform:uppercase; }
+  .login-hero-title{ font-family:var(--font-display); font-size:clamp(34px,6vw,60px); font-weight:700; line-height:1.08; }
+  .login-hero-sub{ font-size:15px; letter-spacing:3px; font-weight:600; margin-top:10px; opacity:0.95; text-transform:uppercase; }
   .login-card{
     background:var(--surface); border-radius:16px; box-shadow:0 20px 60px rgba(0,0,0,0.25);
     padding:34px 32px 26px; width:100%; max-width:380px; text-align:center;
@@ -325,6 +353,11 @@
 
 <!-- ===================== LOGIN SCREEN ===================== -->
 <div id="loginScreen">
+  <div class="login-hero">
+    <div class="login-hero-eyebrow">Welcome to System</div>
+    <div class="login-hero-title">Gen's Ulba</div>
+    <div class="login-hero-sub">SD Islam Ulul Albab</div>
+  </div>
   <div class="login-card">
     <div class="login-logos">
       <img src="LOGO1_PLACEHOLDER" alt="Logo SD Islam Ulul Albab">
@@ -429,6 +462,7 @@ const NAV_ITEMS = [
   {id:'pembagian', label:'Pembagian Ruangan', icon:'&#9638;', roles:['admin']},
   {id:'kuota', label:'Pengaturan Kuota', icon:'&#9881;', roles:['admin']},
   {id:'cetak', label:'Cetak Laporan', icon:'&#128424;', roles:['admin']},
+  {id:'kenaikankelas', label:'Kenaikan Kelas Serentak', icon:'&#8593;', roles:['admin']},
   {id:'uji', label:'Uji Kenaikan Siswa', icon:'&#9998;', roles:['admin','penguji']},
   {id:'riwayat', label:'Riwayat Penilaian', icon:'&#128220;', roles:['admin','penguji']},
 ];
@@ -548,7 +582,7 @@ function showConfirm(message, confirmLabel){
    CARA AKTIFKAN GOOGLE SHEETS:
    Ikuti panduan di file Code.gs yang disertakan, lalu ganti nilai
    SHEETS_API_URL di bawah ini dengan URL Web App hasil deploy kamu. */
-const SHEETS_API_URL = "https://script.google.com/macros/s/AKfycbycSKd9BIRQk-jZrujKfjzUdprTCA_AqjA41eruLy0QTc2TFDi-AchpUNHFYMpC9WVN/exec";
+const SHEETS_API_URL = "https://script.google.com/macros/s/AKfycbyqWUiGbZheJs1TmvnUNakUPRIq88ctL5-Jh0EBvenxASOkPsQTykOK-V6VxZ_WMgmW/exec";
 
 const LS_PREFIX = 'gens-ulba::';
 
@@ -633,6 +667,35 @@ async function storageList(prefix){
   }
 }
 
+// Ambil SEMUA key+value untuk sebuah prefix dalam SATU permintaan (jauh lebih cepat
+// daripada storageList() lalu storageGet() satu-satu untuk tiap key - itu yang bikin
+// loading Admin lama karena riwayat penilaian bisa ratusan catatan). Kalau backend
+// belum mendukung (Apps Script belum di-update), otomatis pakai cara lama sebagai fallback.
+async function storageGetPrefixMap(prefix){
+  try{
+    if(hasSheetsApi()){
+      const res = await fetch(SHEETS_API_URL + '?action=listWithValues&prefix=' + encodeURIComponent(prefix));
+      const data = await res.json();
+      if(data && Array.isArray(data.items)){
+        const out = {};
+        data.items.forEach(it=>{
+          try{ out[it.key] = JSON.parse(it.value); }catch(e){ /* skip corrupt entry */ }
+        });
+        return out;
+      }
+      // Backend lama belum punya action listWithValues -> fallback cara lama
+    }
+    const keys = await storageList(prefix);
+    const values = await Promise.all(keys.map(k => storageGet(k)));
+    const out = {};
+    keys.forEach((k,i)=>{ out[k] = values[i]; });
+    return out;
+  }catch(e){
+    console.error('storageGetPrefixMap gagal', prefix, e);
+    return {};
+  }
+}
+
 async function loadAllData(){
   const [siswa, guru, quota] = await Promise.all([
     storageGet('siswa-list'),
@@ -668,9 +731,10 @@ async function loadAllData(){
 
   // Penilaian disimpan 1 key per catatan (bukan 1 array besar) supaya aman
   // ditulis banyak Penguji secara bersamaan tanpa saling menimpa punya orang lain.
-  const penilaianKeys = await storageList('penilaian:');
-  const penilaianResults = await Promise.all(penilaianKeys.map(k => storageGet(k)));
-  state.penilaianList = penilaianResults.filter(Boolean).sort((a,b)=> (b.ts||0) - (a.ts||0));
+  // Diambil sekaligus dalam 1 permintaan (bukan satu-satu) supaya loading cepat
+  // walau riwayatnya sudah ratusan catatan.
+  const penilaianMap = await storageGetPrefixMap('penilaian:');
+  state.penilaianList = Object.values(penilaianMap).filter(Boolean).sort((a,b)=> (b.ts||0) - (a.ts||0));
 
   state.loaded = true;
 }
@@ -723,7 +787,9 @@ function getRoomsForLevel(kode){
       seen.push(g.ruangan);
     }
   });
-  return seen;
+  // Urutkan A, B, C, dst (bukan urutan input data guru) supaya pembagian ruangan
+  // dan cetak laporan selalu konsisten dari kelas A dulu, tidak bolak-balik.
+  return seen.sort((a,b)=>a.localeCompare(b, 'id', {numeric:true, sensitivity:'base'}));
 }
 
 // Guru name(s) teaching a given room, joined with " & "
@@ -792,11 +858,30 @@ function allDistinctRooms(){
   state.guruList.forEach(g=>{
     if(g.ruangan && !seen.includes(g.ruangan)) seen.push(g.ruangan);
   });
-  return seen;
+  return seen.sort((a,b)=>a.localeCompare(b, 'id', {numeric:true, sensitivity:'base'}));
 }
 
 function uid(prefix){
   return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+}
+
+/* ======================= KENAIKAN KELAS SERENTAK ======================= */
+// Format kelas yang dipakai sekolah ini: angka tingkat + huruf rombel, mis. "4B".
+// Kenaikan hanya mengganti angka tingkatnya saja, huruf rombel tetap sama
+// (jadi 4B -> 5B, bukan pindah rombel) - sesuai aturan sekolah sejak awal.
+function parseKelas(kelas){
+  const m = /^(\d+)\s*([A-Za-z]*)$/.exec((kelas||'').trim());
+  if(!m) return null;
+  return { tingkat: parseInt(m[1], 10), rombel: m[2] || '' };
+}
+
+// Mengembalikan label kelas tingkat berikutnya, atau null kalau siswa itu
+// sudah kelas 6 (artinya lulus - akan diarsipkan, bukan dinaikkan lagi).
+function nextKelasLabel(kelas){
+  const p = parseKelas(kelas);
+  if(!p) return kelas; // format tak dikenali - biarkan apa adanya, jangan diubah
+  if(p.tingkat >= 6) return null;
+  return (p.tingkat + 1) + p.rombel;
 }
 
 /* ======================= NAV / ROUTER ======================= */
@@ -809,6 +894,7 @@ const PAGE_META = {
   cetak:{title:'Cetak Laporan', sub:'Cetak atau unduh daftar siswa per ruangan'},
   uji:{title:'Uji Kenaikan Siswa', sub:'Isi blanko penilaian Tilawati sesuai tingkatan siswa'},
   riwayat:{title:'Riwayat Penilaian', sub:'Rekap hasil uji kenaikan yang sudah diinput'},
+  kenaikankelas:{title:'Kenaikan Kelas Serentak', sub:'Naikkan kelas SEMUA siswa sekaligus di akhir tahun ajaran'},
 };
 
 function renderNav(){
@@ -848,8 +934,13 @@ function render(){
   else if(state.view === 'pembagian') c.innerHTML = renderPembagianPage();
   else if(state.view === 'kuota') c.innerHTML = renderKuotaPage();
   else if(state.view === 'cetak') c.innerHTML = renderCetakPage();
+  else if(state.view === 'kenaikankelas') c.innerHTML = renderKenaikanKelasPage();
   else if(state.view === 'uji') c.innerHTML = renderUjiPage();
   else if(state.view === 'riwayat') c.innerHTML = renderRiwayatPage();
+  // Animasi masuk halaman setiap kali konten berganti (fade + geser naik sedikit)
+  c.classList.remove('page-enter');
+  void c.offsetWidth; // paksa reflow supaya animasi CSS terpicu ulang
+  c.classList.add('page-enter');
   bindViewEvents();
 }
 
@@ -1524,8 +1615,13 @@ function printBlankoPenilaian(record){
 
 /* ======================= CETAK LAPORAN ======================= */
 function renderCetakPage(){
-  const {rooms} = assignRooms(state.cetakLevel);
-  if(!rooms.find(r=>r.room===state.cetakRoom) && state.cetakRoom !== '__ALL__'){
+  const merged = getMergedRoomAssignments();
+  // Ruangan yang relevan untuk tab tingkatan yang dipilih (buat navigasi saja) -
+  // tapi daftar siswa yang ditampilkan/dicetak SELALU daftar gabungan penuh
+  // ruang itu (semua tingkatan yang ada di situ), supaya ruang campur tidak
+  // pernah tercetak dua kali.
+  const roomsForTab = merged.filter(r => r.levels.includes(state.cetakLevel));
+  if(!merged.find(r=>r.room===state.cetakRoom) && state.cetakRoom !== '__ALL__'){
     state.cetakRoom = '__ALL__';
   }
   const tabs = LEVELS.map(l=>`
@@ -1533,7 +1629,7 @@ function renderCetakPage(){
   `).join('');
 
   const roomOptions = `<option value="__ALL__">Semua ruangan (${state.cetakLevel})</option>` +
-    rooms.map(r=>`<option value="${escapeAttr(r.room)}" ${state.cetakRoom===r.room?'selected':''}>Ruang ${r.room} (${r.students.length} siswa)</option>`).join('');
+    roomsForTab.map(r=>`<option value="${escapeAttr(r.room)}" ${state.cetakRoom===r.room?'selected':''}>Ruang ${r.room} (${r.students.length} siswa)${r.levels.length>1?' — campur '+r.levels.join(' & '):''}</option>`).join('');
 
   return `
     <div class="level-tabs">${tabs}</div>
@@ -1544,14 +1640,18 @@ function renderCetakPage(){
         <button class="btn btn-outline" id="btnCsv">&#8681; Unduh Excel (.xlsx)</button>
       </div>
       <div style="margin-top:14px;">
-        ${rooms.length===0 ? `<div class="empty-state">Belum ada ruangan untuk tingkatan ini.</div>` :
-          rooms.map(r=>`
+        ${roomsForTab.length===0 ? `<div class="empty-state">Belum ada ruangan untuk tingkatan ini.</div>` :
+          roomsForTab.map(r=>`
             <div style="margin-bottom:18px;">
-              <div style="font-weight:700; margin-bottom:6px; color:var(--teal-dark);">Ruang ${escapeHtml(r.room)} &mdash; ${r.students.length} siswa <span style="font-weight:400; color:var(--ink-muted);">(Guru: ${escapeHtml(r.guru)||'-'})</span></div>
+              <div style="font-weight:700; margin-bottom:6px; color:var(--teal-dark);">
+                Ruang ${escapeHtml(r.room)} &mdash; ${r.students.length} siswa
+                <span style="font-weight:400; color:var(--ink-muted);">(Guru: ${escapeHtml(r.guru)||'-'})</span>
+                ${r.levels.length>1?`<span class="pill pill-gold" style="margin-left:6px;">Campur ${escapeHtml(r.levels.join(' & '))}</span>`:''}
+              </div>
               <div class="table-scroll" style="max-height:220px;">
                 <table class="data-table">
-                  <thead><tr><th style="width:44px;">No</th><th>Nama</th><th style="width:90px;">Kelas</th></tr></thead>
-                  <tbody>${r.students.map((s,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(s.nama)}</td><td>${escapeHtml(s.kelas||'')}</td></tr>`).join('')}</tbody>
+                  <thead><tr><th style="width:44px;">No</th><th>Nama</th><th style="width:90px;">Kelas</th>${r.levels.length>1?'<th style="width:110px;">Tilawati</th>':''}</tr></thead>
+                  <tbody>${r.students.map((s,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(s.nama)}</td><td>${escapeHtml(s.kelas||'')}</td>${r.levels.length>1?`<td>${escapeHtml(s.tilawati)}</td>`:''}</tr>`).join('')}</tbody>
                 </table>
               </div>
             </div>
@@ -1569,25 +1669,56 @@ function formatTanggalIndo(d){
   return `${hari}, ${tgl} ${bulan} ${d.getFullYear()}`;
 }
 
+// Gabungkan hasil assignRooms() dari SEMUA tingkat Tilawati per ruang fisik.
+// Kalau satu ruang (mis. "1C") berisi campuran siswa Tilawati 1 & 2 (lewat
+// pemindahan manual), mereka digabung jadi SATU daftar ruang - bukan tercetak
+// dua kali terpisah per tingkatan. Kode guru/ruangan tidak perlu diubah sama
+// sekali; guru yang terdaftar di ruang itu otomatis dianggap bisa mengajar
+// campuran tingkatan yang ada di ruangnya.
+function getMergedRoomAssignments(){
+  const merged = {};
+  LEVELS.forEach(level=>{
+    const {rooms} = assignRooms(level.label);
+    rooms.forEach(r=>{
+      if(!merged[r.room]){
+        merged[r.room] = {room:r.room, guru:r.guru, quota:r.quota, students:[], levels:new Set()};
+      }
+      r.students.forEach(s=>{
+        merged[r.room].students.push(s);
+        merged[r.room].levels.add(s.tilawati);
+      });
+    });
+  });
+  return Object.values(merged)
+    .map(r=>({...r, levels:[...r.levels].sort((a,b)=>LEVEL_LABELS.indexOf(a)-LEVEL_LABELS.indexOf(b))}))
+    .sort((a,b)=>a.room.localeCompare(b.room,'id',{numeric:true, sensitivity:'base'}));
+}
+
 /* ---- CETAK: mengikuti format resmi "Edaran Kelas Tilawati" sekolah ---- */
 function buildPrintDocument(){
-  const {rooms} = assignRooms(state.cetakLevel);
-  const targetRooms = state.cetakRoom === '__ALL__' ? rooms : rooms.filter(r=>r.room===state.cetakRoom);
+  const merged = getMergedRoomAssignments();
+  const roomsForTab = merged.filter(r => r.levels.includes(state.cetakLevel));
+  const targetRooms = state.cetakRoom === '__ALL__' ? roomsForTab : merged.filter(r=>r.room===state.cetakRoom);
   const tanggal = formatTanggalIndo(new Date());
 
   const pages = targetRooms.map(r=>{
     const quota = getQuotaForRoom(r.room);
+    const rowCount = Math.max(quota, r.students.length);
     let rowsHtml = '';
-    for(let i=0;i<quota;i++){
+    for(let i=0;i<rowCount;i++){
       const s = r.students[i];
-      rowsHtml += `<tr><td class="c-no">${i+1}</td><td class="c-nama">${s?escapeHtml(s.nama):''}</td><td class="c-kelas">${s?escapeHtml(s.kelas||''):''}</td></tr>`;
+      const tilawatiCell = r.levels.length>1 ? `<td class="c-tilawati">${s?escapeHtml(s.tilawati):''}</td>` : '';
+      rowsHtml += `<tr><td class="c-no">${i+1}</td><td class="c-nama">${s?escapeHtml(s.nama):''}</td><td class="c-kelas">${s?escapeHtml(s.kelas||''):''}</td>${tilawatiCell}</tr>`;
     }
+    const levelTitle = r.levels.length>1
+      ? `TILAWATI ${escapeHtml(r.levels.map(l=>l.replace('Tilawati ','')).join(' &amp; '))}`
+      : escapeHtml(state.cetakLevel.toUpperCase());
     return `
     <section class="print-page">
       <div class="edaran-head">
         <img src="${LOGO1_DATA}" class="edaran-logo">
         <div class="edaran-titles">
-          <div class="edaran-title">${escapeHtml(state.cetakLevel.toUpperCase())}</div>
+          <div class="edaran-title">${levelTitle}</div>
           <div class="edaran-title">RUANG ${escapeHtml(r.room.toUpperCase())}</div>
         </div>
         <img src="${LOGO2_DATA}" class="edaran-logo">
@@ -1595,7 +1726,7 @@ function buildPrintDocument(){
       <div class="edaran-guru">Guru: ${escapeHtml(r.guru)||'-'}</div>
       <div class="edaran-tanggal">${escapeHtml(tanggal)}</div>
       <table class="print-table">
-        <thead><tr><th class="c-no">NO</th><th class="c-nama">NAMA LENGKAP</th><th class="c-kelas">KELAS</th></tr></thead>
+        <thead><tr><th class="c-no">NO</th><th class="c-nama">NAMA LENGKAP</th><th class="c-kelas">KELAS</th>${r.levels.length>1?'<th class="c-tilawati">TILAWATI</th>':''}</tr></thead>
         <tbody>${rowsHtml}</tbody>
       </table>
     </section>`;
@@ -1621,6 +1752,7 @@ function buildPrintDocument(){
   .c-no{ width:44px; text-align:center; }
   .c-nama{ text-align:left; }
   .c-kelas{ width:90px; text-align:center; }
+  .c-tilawati{ width:110px; text-align:center; }
   .print-table tr{ page-break-inside:avoid; }
 </style></head>
 <body>${pages || '<p style="padding:30px;">Tidak ada data untuk dicetak.</p>'}</body></html>`;
@@ -1829,6 +1961,7 @@ function bindViewEvents(){
   else if(state.view === 'pembagian') bindPembagianEvents();
   else if(state.view === 'kuota') bindKuotaEvents();
   else if(state.view === 'cetak') bindCetakEvents();
+  else if(state.view === 'kenaikankelas') bindKenaikanKelasEvents();
   else if(state.view === 'uji') bindUjiEvents();
   else if(state.view === 'riwayat') bindRiwayatEvents();
 }
@@ -2000,6 +2133,99 @@ function bindCetakEvents(){
   });
   document.getElementById('btnCetak').addEventListener('click', doPrint);
   document.getElementById('btnCsv').addEventListener('click', doExcelExport);
+}
+
+/* ======================= KENAIKAN KELAS SERENTAK ======================= */
+function renderKenaikanKelasPage(){
+  // Ringkasan jumlah siswa per tingkat kelas saat ini, supaya admin bisa cek dulu
+  // sebelum menekan tombol proses.
+  const counts = {};
+  state.siswaList.forEach(s=>{
+    const p = parseKelas(s.kelas);
+    const key = p ? (p.tingkat + p.rombel) : (s.kelas || '(kosong)');
+    counts[key] = (counts[key]||0) + 1;
+  });
+  const kelasSorted = Object.keys(counts).sort((a,b)=>a.localeCompare(b, 'id', {numeric:true}));
+  const kelas6Count = state.siswaList.filter(s=>{ const p = parseKelas(s.kelas); return p && p.tingkat >= 6; }).length;
+
+  const summaryRows = kelasSorted.map(k=>{
+    const p = parseKelas(k);
+    const willBecome = (p && p.tingkat >= 6) ? 'Diarsipkan (lulus)' : (nextKelasLabel(k) || '-');
+    return `<tr><td>${escapeHtml(k)}</td><td>${counts[k]}</td><td>${escapeHtml(willBecome)}</td></tr>`;
+  }).join('');
+
+  return `
+    <div class="card" style="padding:20px; margin-bottom:16px;">
+      <div class="banner warn" style="margin-bottom:16px;">
+        <b>Perhatian:</b> Proses ini menaikkan kelas <b>SEMUA siswa sekaligus</b> (contoh: 4B menjadi 5B - hanya angka kelasnya yang berubah, rombel/huruf tetap sama).
+        Siswa yang saat ini di <b>kelas 6</b> (${kelas6Count} siswa) akan <b>diarsipkan</b> dan tidak lagi muncul di sistem manapun.
+        Tingkat Tilawati siswa <b>tidak ikut berubah</b> - hanya kelasnya saja.
+        Lakukan ini <b>satu kali di akhir tahun ajaran</b>. Tindakan ini tidak bisa dibatalkan secara otomatis.
+      </div>
+      <table class="data-table" style="margin-bottom:16px;">
+        <thead><tr><th>Kelas saat ini</th><th>Jumlah siswa</th><th>Akan menjadi</th></tr></thead>
+        <tbody>${summaryRows || `<tr><td colspan="3"><div class="empty-state">Belum ada data siswa.</div></td></tr>`}</tbody>
+      </table>
+      <button class="btn btn-danger" id="btnProsesKenaikanKelas">Proses Kenaikan Kelas Serentak</button>
+    </div>
+  `;
+}
+
+async function processKenaikanKelasSerentak(){
+  const confirm1 = await showConfirm(
+    `Anda akan menaikkan kelas SEMUA ${state.siswaList.length} siswa sekaligus, dan mengarsipkan siswa kelas 6. Tindakan ini tidak bisa dibatalkan otomatis. Lanjutkan?`,
+    'Ya, Lanjutkan'
+  );
+  if(!confirm1) return;
+  const confirm2 = await showConfirm(
+    'Konfirmasi sekali lagi: proses kenaikan kelas serentak akan langsung dijalankan sekarang. Yakin?',
+    'Ya, Proses Sekarang'
+  );
+  if(!confirm2) return;
+
+  setSaving(true);
+  let promotedCount = 0, archivedCount = 0;
+  try{
+    // Ambil data terbaru dari penyimpanan bersama dulu (bukan yang ada di memori),
+    // supaya tidak menimpa perubahan admin lain yang mungkin baru saja masuk.
+    const latestSiswa = await storageGet('siswa-list');
+    const currentList = (latestSiswa && latestSiswa.length) ? latestSiswa : state.siswaList.slice();
+
+    const remaining = [];
+    const archived = [];
+    currentList.forEach(s=>{
+      const next = nextKelasLabel(s.kelas);
+      if(next === null){
+        archived.push({...s, kelasSaatArsip: s.kelas, tanggalArsip: formatTanggalIndo(new Date())});
+        archivedCount++;
+      }else{
+        remaining.push({...s, kelas: next});
+        promotedCount++;
+      }
+    });
+
+    // Simpan daftar arsip digabung dengan arsip lama (kalau ada), supaya data
+    // kelas 6 tahun-tahun sebelumnya tidak hilang.
+    const latestArchive = await storageGet('siswa-archive');
+    const archiveList = (latestArchive && latestArchive.length) ? latestArchive.concat(archived) : archived;
+
+    await storageSet('siswa-list', remaining);
+    await storageSet('siswa-archive', archiveList);
+    state.siswaList = remaining;
+  }catch(e){
+    console.error('Gagal proses kenaikan kelas serentak', e);
+    setSaving(false);
+    await showAlert('Terjadi kesalahan saat memproses kenaikan kelas. Coba lagi.');
+    return;
+  }
+  setSaving(false);
+  render();
+  await showAlert(`Selesai. ${promotedCount} siswa naik kelas, ${archivedCount} siswa (kelas 6) diarsipkan.`);
+}
+
+function bindKenaikanKelasEvents(){
+  const btn = document.getElementById('btnProsesKenaikanKelas');
+  if(btn) btn.addEventListener('click', processKenaikanKelasSerentak);
 }
 
 /* ======================= MENU TOGGLE (mobile) ======================= */
