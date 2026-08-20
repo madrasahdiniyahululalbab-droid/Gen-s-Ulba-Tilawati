@@ -1020,6 +1020,8 @@ const PAGE_META = {
   riwayat:{title:'Riwayat Penilaian', sub:'Rekap hasil uji kenaikan yang sudah diinput'},
 };
 
+let lastAnimatedView = null;
+
 function renderNav(){
   const nav = document.getElementById('navList');
   const items = NAV_ITEMS.filter(item=>item.roles.includes(state.role));
@@ -1059,10 +1061,14 @@ function render(){
   else if(state.view === 'cetak') c.innerHTML = renderCetakPage();
   else if(state.view === 'uji') c.innerHTML = renderUjiPage();
   else if(state.view === 'riwayat') c.innerHTML = renderRiwayatPage();
-  // Animasi masuk halaman setiap kali konten berganti (fade + geser naik sedikit)
-  c.classList.remove('page-enter');
-  void c.offsetWidth; // paksa reflow supaya animasi CSS terpicu ulang
-  c.classList.add('page-enter');
+  // Animasi cuma dipicu saat BERPINDAH menu (bukan tiap kali render dipanggil),
+  // supaya tidak mengganggu saat mengetik/update data di halaman yang sama.
+  if(lastAnimatedView !== state.view){
+    c.classList.remove('page-enter');
+    void c.offsetWidth; // paksa reflow supaya animasi CSS terpicu ulang
+    c.classList.add('page-enter');
+    lastAnimatedView = state.view;
+  }
   if(isReadOnly()){
     // Ganti field EDIT per-baris (di dalam tbody) jadi teks biasa - ini yang
     // menghindari bentrok tampilan select/native widget dengan header tabel
@@ -1376,9 +1382,18 @@ function escapeHtml(str){
 }
 
 /* ======================= UJI KENAIKAN SISWA (khusus Penguji, sesuai Blanko resmi) ======================= */
-function initUjiForm(tingkat){
-  const materi = (MATERI_TILAWATI[tingkat] || []).map(nama => ({nama, status:'', nilai:''}));
-  state.ujiForm = {tingkat, materi, catatan:''};
+function initUjiForm(tingkat, siswaId){
+  // Kalau siswa ini punya hasil "Pending" sebelumnya di tingkat yang sama,
+  // lanjutkan dari situ (materi & catatan yang sudah diisi tetap terpakai)
+  // bukan mulai kosong lagi dari awal.
+  const pendingRecord = siswaId
+    ? state.penilaianList.find(r => r.siswaId === siswaId && r.tingkatSaat === tingkat && r.hasil === 'Pending')
+    : null;
+  const materi = (MATERI_TILAWATI[tingkat] || []).map(nama => {
+    const saved = pendingRecord ? pendingRecord.materi.find(m=>m.nama===nama) : null;
+    return {nama, status: saved ? saved.status : '', nilai: saved ? saved.nilai : ''};
+  });
+  state.ujiForm = {tingkat, materi, catatan: pendingRecord ? (pendingRecord.catatan || '') : ''};
 }
 
 function renderUjiPage(){
@@ -1444,7 +1459,7 @@ function renderUjiPage(){
         <div class="grid-4" style="grid-template-columns:1fr 1fr; margin-bottom:14px;">
           <div class="card stat-card" style="background:var(--teal-soft); border:none;">
             <div class="stat-label">Nilai Akhir (otomatis)</div>
-            <div class="stat-value">${nilaiAkhir===null ? '-' : nilaiAkhir}</div>
+            <div class="stat-value" id="ujiNilaiAkhirPreview">${nilaiAkhir===null ? '-' : nilaiAkhir}</div>
           </div>
           <div class="card stat-card" style="background:var(--gold-soft); border:none;">
             <div class="stat-label">Penguji</div>
@@ -1470,7 +1485,7 @@ function renderUjiPage(){
       </div>
     `;
   }else if(siswa){
-    initUjiForm(siswa.tilawati);
+    initUjiForm(siswa.tilawati, siswa.id);
     formHtml = `<div class="empty-state">Memuat blanko...</div>`;
   }
 
@@ -1515,11 +1530,29 @@ function renderUjiResultsOnly(){
       state.ujiSiswaId = item.getAttribute('data-id');
       state.ujiSiswaSearch = '';
       const siswa = state.siswaList.find(s=>s.id===state.ujiSiswaId);
-      if(siswa) initUjiForm(siswa.tilawati);
+      if(siswa) initUjiForm(siswa.tilawati, siswa.id);
       else state.ujiForm = null;
       render();
     });
   });
+}
+
+// Update tampilan Nilai Akhir & tombol Hasil Kenaikan TANPA render ulang
+// seluruh halaman - supaya mengetik nilai tidak bikin layar "berkedip"/animasi
+// dan fokus ketikan tidak hilang.
+function refreshUjiLivePreview(){
+  if(!state.ujiForm) return;
+  const filledNilai = state.ujiForm.materi.map(m=>parseFloat(m.nilai)).filter(n=>!isNaN(n));
+  const nilaiAkhir = filledNilai.length ? Math.round(filledNilai.reduce((a,b)=>a+b,0)/filledNilai.length) : null;
+  const allFilled = state.ujiForm.materi.every(m=>m.status && m.nilai !== '');
+
+  const preview = document.getElementById('ujiNilaiAkhirPreview');
+  if(preview) preview.textContent = nilaiAkhir===null ? '-' : nilaiAkhir;
+
+  const btnNaik = document.getElementById('btnHasilNaik');
+  const btnTetap = document.getElementById('btnHasilTetap');
+  if(btnNaik) btnNaik.disabled = !allFilled;
+  if(btnTetap) btnTetap.disabled = !allFilled;
 }
 
 function bindUjiEvents(){
@@ -1530,7 +1563,7 @@ function bindUjiEvents(){
       state.ujiSiswaId = id;
       state.ujiSiswaSearch = '';
       const siswa = state.siswaList.find(s=>s.id===id);
-      if(siswa) initUjiForm(siswa.tilawati);
+      if(siswa) initUjiForm(siswa.tilawati, siswa.id);
       else state.ujiForm = null;
       render();
     };
@@ -1569,15 +1602,17 @@ function bindUjiEvents(){
       state.ujiForm.materi[idx].status = status;
       if(status && NILAI_SUGGEST[status] !== undefined && state.ujiForm.materi[idx].nilai === ''){
         state.ujiForm.materi[idx].nilai = NILAI_SUGGEST[status];
+        const nilaiInput = tbody.querySelector(`.uji-nilai[data-idx="${idx}"]`);
+        if(nilaiInput) nilaiInput.value = NILAI_SUGGEST[status];
       }
-      render();
+      refreshUjiLivePreview();
     });
   });
   tbody.querySelectorAll('.uji-nilai').forEach(inp=>{
     inp.addEventListener('input', (e)=>{
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
       state.ujiForm.materi[idx].nilai = e.target.value;
-      render();
+      refreshUjiLivePreview();
     });
     inp.addEventListener('focus', (e)=>{ e.target.select(); });
   });
@@ -2705,6 +2740,11 @@ function handleLogin(e){
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
     state.view = account.role === 'admin' ? 'dashboard' : 'uji';
+    // Simpan sesi di sessionStorage supaya refresh halaman tidak perlu login
+    // ulang. sessionStorage otomatis kosong lagi kalau tab/browser ditutup.
+    try{
+      sessionStorage.setItem('gens-ulba-auth', JSON.stringify({role: account.role, pengujiName: state.pengujiName}));
+    }catch(e){ /* abaikan kalau sessionStorage tidak tersedia */ }
     startApp();
   };
 
@@ -2736,6 +2776,7 @@ function handleLogout(){
   }
   state.role = null;
   state.pengujiName = '';
+  try{ sessionStorage.removeItem('gens-ulba-auth'); }catch(e){ /* abaikan */ }
   document.getElementById('loginForm').reset();
   document.getElementById('loginError').textContent = '';
   document.getElementById('app').style.display = 'none';
@@ -2748,6 +2789,33 @@ document.getElementById('loginUsername').addEventListener('input', (e)=>{
   const wrap = document.getElementById('loginPengujiNameWrap');
   wrap.style.display = e.target.value.trim().toLowerCase() === 'penguji' ? 'block' : 'none';
 });
+
+// Kalau ada sesi login tersimpan (dari sebelum halaman di-refresh), langsung
+// masuk lagi tanpa perlu isi username/password ulang. Sesi ini otomatis
+// terhapus kalau tab/browser benar-benar ditutup (bukan cuma refresh).
+function restoreSession(){
+  try{
+    const raw = sessionStorage.getItem('gens-ulba-auth');
+    if(!raw) return false;
+    const saved = JSON.parse(raw);
+    if(!saved || !saved.role) return false;
+    state.role = saved.role;
+    state.pengujiName = saved.pengujiName || '';
+    document.getElementById('whoAmI').textContent = saved.role === 'admin' ? 'Masuk sebagai Admin' : ('Penguji: ' + state.pengujiName);
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('app').style.display = 'flex';
+    state.view = saved.role === 'admin' ? 'dashboard' : 'uji';
+    if(saved.role === 'admin'){
+      adminHeartbeat(); // langsung daftarkan sesi ini tanpa menunggu interval pertama
+      startAdminHeartbeat();
+    }
+    startApp();
+    return true;
+  }catch(e){
+    return false;
+  }
+}
+restoreSession();
 
 /* ======================= INIT ======================= */
 let appStarted = false;
