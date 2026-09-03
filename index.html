@@ -304,6 +304,13 @@
   }
   .level-tab.active{background:var(--teal); border-color:var(--teal); color:#fff;}
 
+  .cetak-mode-tabs{display:flex; gap:8px; margin-bottom:16px;}
+  .cetak-mode-tab{
+    padding:9px 18px; border-radius:12px; font-size:13px; font-weight:700; cursor:pointer;
+    border:1px solid var(--border); background:#fff; color:var(--ink-muted); user-select:none;
+  }
+  .cetak-mode-tab.active{background:var(--teal-dark); border-color:var(--teal-dark); color:#fff;}
+
   .empty-state{text-align:center; padding:50px 20px; color:var(--ink-muted);}
   .readonly-text{display:inline-block; padding:6px 4px; color:var(--ink); font-size:13.5px;}
 
@@ -611,6 +618,8 @@ const state = {
 
   cetakLevel: LEVELS[0].label,
   cetakRoom: '__ALL__',
+  cetakMode: 'ruangan', // 'ruangan' | 'kelas'
+  cetakKelas: '__ALL__',
 
   // auth
   role: null,          // 'admin' | 'penguji'
@@ -890,6 +899,7 @@ async function loadAllData(){
     state.siswaList = SEED_SISWA.slice();
     if(!hasSheetsApi()) storageSet('siswa-list', state.siswaList);
   }
+  sortSiswaListInPlace(state.siswaList); // urutkan per kelas + abjad nama setiap kali data dimuat
 
   if(guru && guru.length){
     state.guruList = guru;
@@ -971,12 +981,26 @@ async function safeListUpdate(key, stateKey, mutateFn){
     const latest = await storageGet(key);
     const list = (latest && Array.isArray(latest) && latest.length) ? latest : state[stateKey].slice();
     mutateFn(list);
+    // Data siswa selalu diurutkan per kelas lalu abjad nama di sini (bukan cuma
+    // saat ditampilkan), supaya urutan ini otomatis konsisten di SEMUA tempat:
+    // pembagian ruangan, cetak laporan, unduh Excel, pencarian di Uji Kenaikan, dst.
+    if(key === 'siswa-list') sortSiswaListInPlace(list);
     state[stateKey] = list;
     await storageSet(key, list);
   }catch(e){
     console.error('safeListUpdate gagal', key, e);
   }
   setSaving(false);
+}
+
+// Urutkan array siswa langsung di tempat (in-place): per kelas (1A, 1B, 2A, ...)
+// dulu, lalu abjad nama di dalam kelas yang sama.
+function sortSiswaListInPlace(list){
+  list.sort((a,b)=>{
+    const kelasCompare = (a.kelas||'').localeCompare(b.kelas||'', 'id', {numeric:true, sensitivity:'base'});
+    if(kelasCompare !== 0) return kelasCompare;
+    return (a.nama||'').localeCompare(b.nama||'', 'id', {sensitivity:'base'});
+  });
 }
 
 /* ======================= DERIVED LOGIC ======================= */
@@ -1013,6 +1037,79 @@ function getQuotaForRoom(roomName){
 // first regardless of quota order — the override can be ANY room in the school,
 // not just rooms normally used for this level, so admin can freely move a student
 // (e.g. put a Tilawati 1 student into room 5A).
+// Hitung & KUNCI (sticky) pembagian ruang untuk siswa yang belum punya ruang
+// tetap, atau yang levelnya baru berubah. Sekali seorang siswa dapat ruang,
+// ruang itu TIDAK akan berubah lagi walau ada siswa baru masuk atau siswa lain
+// naik tingkat - supaya guru & teman satu ruang tetap konsisten (tidak ada lagi
+// perpindahan mendadak yang bikin setoran jadi ganti-ganti guru).
+// Kalau ada beberapa ruang yang muat, diutamakan ruang yang sudah berisi
+// teman sekelas (kelas asal sama) supaya siswa kelas bawah yang baru naik
+// jilid tidak merasa sendirian tanpa teman sebaya.
+function ensureRoomAssignments(){
+  let changed = false;
+  LEVELS.forEach(level=>{
+    const rooms = getRoomsForLevel(level.kode);
+    const studentsInLevel = state.siswaList.filter(s=>s.tilawati === level.label);
+    if(studentsInLevel.length === 0) return;
+
+    const roomBuckets = rooms.map(r=>({room:r, quota:getQuotaForRoom(r), count:0, kelasCounts:{}}));
+    const needsAssignment = [];
+
+    studentsInLevel.forEach(s=>{
+      if(s.roomOverride){
+        return; // pindahan manual - dihormati apa adanya, tidak disentuh di sini
+      }
+      if(s.assignedRoom && s.assignedLevel === level.label && rooms.includes(s.assignedRoom)){
+        const bucket = roomBuckets.find(b=>b.room === s.assignedRoom);
+        if(bucket){
+          bucket.count++;
+          bucket.kelasCounts[s.kelas] = (bucket.kelasCounts[s.kelas]||0) + 1;
+        }
+        return; // sudah punya ruang tetap yang masih valid - biarkan
+      }
+      needsAssignment.push(s);
+    });
+
+    needsAssignment.forEach(s=>{
+      let best = null;
+      roomBuckets.forEach(b=>{
+        if(b.count >= b.quota) return;
+        const sameKelasCount = b.kelasCounts[s.kelas] || 0;
+        if(!best || sameKelasCount > best.sameKelasCount || (sameKelasCount === best.sameKelasCount && b.count < best.count)){
+          best = {bucket:b, sameKelasCount};
+        }
+      });
+      if(best){
+        best.bucket.count++;
+        best.bucket.kelasCounts[s.kelas] = (best.bucket.kelasCounts[s.kelas]||0) + 1;
+        s.assignedRoom = best.bucket.room;
+        s.assignedLevel = level.label;
+        changed = true;
+      }else if(s.assignedRoom){
+        s.assignedRoom = '';
+        s.assignedLevel = '';
+        changed = true;
+      }
+    });
+  });
+  return changed;
+}
+
+// Jalankan ensureRoomAssignments() lalu simpan perubahannya (kalau ada) ke
+// penyimpanan bersama, supaya ruang yang sudah "dikunci" ini konsisten di
+// semua perangkat/sesi - bukan cuma di memori browser saat ini.
+async function ensureAndPersistRoomAssignments(){
+  const changed = ensureRoomAssignments();
+  if(!changed) return;
+  const snapshot = state.siswaList.map(s=>({id:s.id, assignedRoom:s.assignedRoom, assignedLevel:s.assignedLevel}));
+  await safeListUpdate('siswa-list', 'siswaList', list=>{
+    snapshot.forEach(sv=>{
+      const target = list.find(x=>x.id===sv.id);
+      if(target){ target.assignedRoom = sv.assignedRoom; target.assignedLevel = sv.assignedLevel; }
+    });
+  });
+}
+
 function assignRooms(levelLabel){
   const level = LEVELS.find(l=>l.label === levelLabel);
   if(!level) return {rooms:[], leftover:[]};
@@ -1023,35 +1120,31 @@ function assignRooms(levelLabel){
   const roomBuckets = rooms.map(r=>({
     room:r, guru:getGuruForRoom(r), quota:getQuotaForRoom(r), students:[]
   }));
+  const extraRoomsMap = {};
+  const leftover = [];
 
-  // Manual overrides can point to any room in the school, including rooms not
-  // normally used for this level — add those as extra buckets so they show up too.
-  const manualRoomsOutside = [...new Set(
-    studentsInLevel.filter(s=>s.roomOverride && !rooms.includes(s.roomOverride)).map(s=>s.roomOverride)
-  )];
-  manualRoomsOutside.forEach(r=>{
-    roomBuckets.push({room:r, guru:getGuruForRoom(r), quota:getQuotaForRoom(r), students:[]});
-  });
+  // Prioritas ruang per siswa: pindahan manual > ruang tetap (sticky) yang
+  // sudah tersimpan. Kalau belum ada satupun, masuk daftar "belum tertampung"
+  // (leftover) - biasanya berarti perlu dijalankan ensureAndPersistRoomAssignments()
+  // dulu, atau kuota/guru perlu ditambah.
+  studentsInLevel.forEach(s=>{
+    let targetRoom = null;
+    if(s.roomOverride) targetRoom = s.roomOverride;
+    else if(s.assignedRoom) targetRoom = s.assignedRoom;
 
-  // Pass 1: manual overrides go straight into their chosen room (even if it goes over quota)
-  const manual = studentsInLevel.filter(s=>s.roomOverride);
-  manual.forEach(s=>{
-    const bucket = roomBuckets.find(b=>b.room === s.roomOverride);
-    if(bucket) bucket.students.push(s);
-  });
+    if(!targetRoom){ leftover.push(s); return; }
 
-  // Pass 2: remaining students (no override) auto-fill the level's normal rooms
-  // with spare capacity, in order. Extra manual-only rooms are not auto-filled.
-  const remaining = studentsInLevel.filter(s=>!s.roomOverride);
-  let idx = 0;
-  for(const bucket of roomBuckets){
-    if(!rooms.includes(bucket.room)) continue;
-    while(bucket.students.length < bucket.quota && idx < remaining.length){
-      bucket.students.push(remaining[idx]);
-      idx++;
+    let bucket = roomBuckets.find(b=>b.room === targetRoom);
+    if(!bucket){
+      if(!extraRoomsMap[targetRoom]){
+        extraRoomsMap[targetRoom] = {room:targetRoom, guru:getGuruForRoom(targetRoom), quota:getQuotaForRoom(targetRoom), students:[]};
+        roomBuckets.push(extraRoomsMap[targetRoom]);
+      }
+      bucket = extraRoomsMap[targetRoom];
     }
-  }
-  const leftover = remaining.slice(idx);
+    bucket.students.push(s);
+  });
+
   return {rooms:roomBuckets, leftover};
 }
 
@@ -1061,6 +1154,23 @@ function allDistinctRooms(){
     if(g.ruangan && !seen.includes(g.ruangan)) seen.push(g.ruangan);
   });
   return seen.sort((a,b)=>a.localeCompare(b, 'id', {numeric:true, sensitivity:'base'}));
+}
+
+// Kumpulkan siswa per kelas asal (1A, 1B, dst - bukan ruang Tilawati), untuk
+// fitur Cetak Kelas. Diurutkan per kelas lalu abjad nama.
+function getKelasGroups(){
+  const groups = {};
+  state.siswaList.forEach(s=>{
+    const key = s.kelas || '(Tanpa Kelas)';
+    if(!groups[key]) groups[key] = [];
+    groups[key].push(s);
+  });
+  return Object.keys(groups)
+    .sort((a,b)=>a.localeCompare(b, 'id', {numeric:true, sensitivity:'base'}))
+    .map(k=>({
+      kelas:k,
+      students: groups[k].slice().sort((a,b)=>a.nama.localeCompare(b.nama, 'id', {sensitivity:'base'}))
+    }));
 }
 
 function uid(prefix){
@@ -1269,6 +1379,9 @@ function getFilteredSiswa(){
       list = list.filter(s=>s.tilawati === state.siswaFilterLevel);
     }
   }
+  // Tidak perlu sort di sini lagi - state.siswaList sudah selalu terurut per
+  // kelas + abjad nama (dijaga oleh sortSiswaListInPlace di safeListUpdate &
+  // loadAllData), jadi urutan ini otomatis konsisten di semua tempat.
   return list;
 }
 
@@ -1287,8 +1400,8 @@ function getAvatarColor(name){
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
-function buildSiswaTableHtml(pageItems, allRooms){
-  return pageItems.map(s=>{
+function buildSiswaTableHtml(pageItems, allRooms, startIndex){
+  return pageItems.map((s,i)=>{
     const roomCell = s.tilawati
       ? `<select class="siswa-ruangan" style="width:130px;" ${allRooms.length?'':'disabled'}>
           <option value="">Otomatis</option>
@@ -1300,7 +1413,7 @@ function buildSiswaTableHtml(pageItems, allRooms){
       : `<span class="status-badge" style="background:#FFF3D6; color:#D9950A;">Perlu Diisi</span>`;
     return `
     <tr data-id="${s.id}">
-      <td>${s.no ?? ''}</td>
+      <td>${startIndex + i + 1}</td>
       <td><input type="text" class="siswa-nama" value="${escapeAttr(s.nama)}" style="width:220px;"></td>
       <td><input type="text" class="siswa-kelas" value="${escapeAttr(s.kelas||'')}" style="width:70px;"></td>
       <td>
@@ -1327,7 +1440,7 @@ function renderSiswaPage(){
   const levelOptions = LEVEL_LABELS.map(l=>`<option value="${l}">${l}</option>`).join('');
   const allRooms = allDistinctRooms();
 
-  const rows = buildSiswaTableHtml(pageItems, allRooms);
+  const rows = buildSiswaTableHtml(pageItems, allRooms, start);
 
   return `
     <div class="card" id="addSiswaCard" style="padding:20px; margin-bottom:16px;">
@@ -1390,7 +1503,7 @@ function refreshSiswaTable(){
 
   const tbody = document.getElementById('siswaTbody');
   if(tbody){
-    tbody.innerHTML = buildSiswaTableHtml(pageItems, allRooms) || `<tr><td colspan="7"><div class="empty-state"><div class="big">Tidak ada data</div>Coba ubah kata kunci pencarian atau filter.</div></td></tr>`;
+    tbody.innerHTML = buildSiswaTableHtml(pageItems, allRooms, start) || `<tr><td colspan="7"><div class="empty-state"><div class="big">Tidak ada data</div>Coba ubah kata kunci pencarian atau filter.</div></td></tr>`;
     bindSiswaRowEvents();
   }
   const countLabel = document.getElementById('siswaCountLabel');
@@ -1883,7 +1996,8 @@ async function submitUjiHasil(hasil){
   state.penilaianList.unshift(record);
 
   if(hasil === 'Naik' && next){
-    await updateSiswaSafely(siswa.id, s => { s.tilawati = next; });
+    await updateSiswaSafely(siswa.id, s => { s.tilawati = next; s.roomOverride = ''; s.assignedRoom = ''; s.assignedLevel = ''; });
+    await ensureAndPersistRoomAssignments();
   }
   setSaving(false);
 
@@ -2022,6 +2136,11 @@ function printBlankoPenilaian(record){
 
   const catatanText = (record.catatan && record.catatan.trim()) ? record.catatan.trim() : 'Tidak Ada Catatan.';
 
+  // Ruang yang ditempati siswa SEKARANG (setelah nilai tersimpan, tingkat
+  // sudah berubah kalau Naik) - supaya penguji/admin tahu ke ruang mana
+  // siswa itu pindah setelah tes ini.
+  const roomNow = getRoomForSiswaId(record.siswaId) || '-';
+
   const html = `<!DOCTYPE html>
 <html lang="id">
 <head>
@@ -2033,6 +2152,7 @@ function printBlankoPenilaian(record){
   body{ font-family:'Times New Roman', Times, serif; color:#000; margin:0; font-size:13px; }
   .top-row{ display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px; }
   .status-box{ border:1.5px solid #000; border-radius:10px; padding:6px 14px; font-weight:bold; font-size:12.5px; white-space:nowrap; }
+  .status-box div{ margin-top:4px; }
   .header{ text-align:center; flex:1; }
   .header .t1{ font-weight:bold; font-size:17px; text-transform:uppercase; }
   .header .t2{ font-weight:bold; font-size:17px; text-transform:uppercase; }
@@ -2061,7 +2181,10 @@ function printBlankoPenilaian(record){
 </head>
 <body>
   <div class="top-row">
-    <div class="status-box">Status : ${escapeHtml(statusText)}</div>
+    <div class="status-box">
+      Status : ${escapeHtml(statusText)}
+      <div>Masuk Kelas : ${escapeHtml(roomNow)}</div>
+    </div>
     <div class="header">
       <div class="t1">LEMBAR PENILAIAN</div>
       <div class="t2">${escapeHtml(record.tingkatSaat.toUpperCase())}</div>
@@ -2122,8 +2245,19 @@ function printBlankoPenilaian(record){
 
 /* ======================= CETAK LAPORAN ======================= */
 function renderCetakPage(){
+  const modeTabs = `
+    <div class="cetak-mode-tabs">
+      <div class="cetak-mode-tab ${state.cetakMode==='ruangan'?'active':''}" data-cetakmode="ruangan">Cetak Ruangan</div>
+      <div class="cetak-mode-tab ${state.cetakMode==='kelas'?'active':''}" data-cetakmode="kelas">Cetak Kelas</div>
+    </div>
+  `;
+
+  if(state.cetakMode === 'kelas'){
+    return modeTabs + renderCetakKelasTab();
+  }
+
   if(state.cetakLevel === '__ARSIP__'){
-    return renderArsipTab();
+    return modeTabs + renderArsipTab();
   }
 
   const merged = getMergedRoomAssignments();
@@ -2137,12 +2271,13 @@ function renderCetakPage(){
   }
   const tabs = LEVELS.map(l=>`
     <div class="level-tab ${state.cetakLevel===l.label?'active':''}" data-cetaklevel="${l.label}">${l.label}</div>
-  `).join('') + `<div class="level-tab ${state.cetakLevel==='__ARSIP__'?'active':''}" data-cetaklevel="__ARSIP__">Arsip</div>`;
+  `).join('')
+    + `<div class="level-tab ${state.cetakLevel==='__ARSIP__'?'active':''}" data-cetaklevel="__ARSIP__">Arsip</div>`;
 
   const roomOptions = `<option value="__ALL__">Semua ruangan (${state.cetakLevel})</option>` +
     roomsForTab.map(r=>`<option value="${escapeAttr(r.room)}" ${state.cetakRoom===r.room?'selected':''}>Ruang ${r.room} (${r.students.length} siswa)${r.levels.length>1?' — campur '+r.levels.join(' & '):''}</option>`).join('');
 
-  return `
+  return modeTabs + `
     <div class="level-tabs">${tabs}</div>
     <div class="card" style="padding:20px;">
       <div class="toolbar">
@@ -2164,6 +2299,37 @@ function renderCetakPage(){
                 <table class="data-table">
                   <thead><tr><th style="width:44px;">No</th><th>Nama</th><th style="width:90px;">Kelas</th>${r.levels.length>1?'<th style="width:110px;">Tilawati</th>':''}</tr></thead>
                   <tbody>${r.students.map((s,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(s.nama)}</td><td>${escapeHtml(s.kelas||'')}</td>${r.levels.length>1?`<td>${escapeHtml(s.tilawati)}</td>`:''}</tr>`).join('')}</tbody>
+                </table>
+              </div>
+            </div>
+          `).join('')
+        }
+      </div>
+    </div>
+  `;
+}
+
+function renderCetakKelasTab(){
+  const groups = getKelasGroups();
+  const shown = state.cetakKelas === '__ALL__' ? groups : groups.filter(g=>g.kelas===state.cetakKelas);
+  const kelasOptions = `<option value="__ALL__">Semua kelas</option>` +
+    groups.map(g=>`<option value="${escapeAttr(g.kelas)}" ${state.cetakKelas===g.kelas?'selected':''}>Kelas ${escapeHtml(g.kelas)} (${g.students.length} siswa)</option>`).join('');
+
+  return `
+    <div class="card" style="padding:20px;">
+      <div class="toolbar">
+        <select id="cetakKelasSelect" style="width:260px;">${kelasOptions}</select>
+        <button class="btn btn-primary" id="btnCetakKelas">&#128424; Cetak</button>
+      </div>
+      <div style="margin-top:14px;">
+        ${shown.length===0 ? `<div class="empty-state">Belum ada data siswa.</div>` :
+          shown.map(g=>`
+            <div style="margin-bottom:18px;">
+              <div style="font-weight:700; margin-bottom:6px; color:var(--teal-dark);">Kelas ${escapeHtml(g.kelas)} &mdash; ${g.students.length} siswa</div>
+              <div class="table-scroll" style="max-height:220px;">
+                <table class="data-table">
+                  <thead><tr><th style="width:44px;">No</th><th>Nama</th><th style="width:110px;">Tilawati</th></tr></thead>
+                  <tbody>${g.students.map((s,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(s.nama)}</td><td>${escapeHtml(s.tilawati||'-')}</td></tr>`).join('')}</tbody>
                 </table>
               </div>
             </div>
@@ -2204,6 +2370,17 @@ function getMergedRoomAssignments(){
   return Object.values(merged)
     .map(r=>({...r, levels:[...r.levels].sort((a,b)=>LEVEL_LABELS.indexOf(a)-LEVEL_LABELS.indexOf(b))}))
     .sort((a,b)=>a.room.localeCompare(b.room,'id',{numeric:true, sensitivity:'base'}));
+}
+
+// Cari ruang tempat seorang siswa (berdasarkan id) berada SEKARANG, sesuai
+// pembagian ruangan terkini. Dipakai di cetak Lembar Penilaian supaya
+// langsung kelihatan siswa itu masuk/pindah ke ruang mana.
+function getRoomForSiswaId(siswaId){
+  const merged = getMergedRoomAssignments();
+  for(const r of merged){
+    if(r.students.some(s=>s.id===siswaId)) return r.room;
+  }
+  return null;
 }
 
 /* ---- CETAK: mengikuti format resmi "Edaran Kelas Tilawati" sekolah ---- */
@@ -2309,6 +2486,52 @@ function buildArsipPrintDocument(){
 </body></html>`;
 }
 
+// Cetak daftar per kelas asal (bukan ruangan Tilawati) - dipakai fitur "Cetak Kelas".
+function buildKelasPrintDocument(kelasFilter){
+  const tanggal = formatTanggalIndo(new Date());
+  const groups = getKelasGroups().filter(g => kelasFilter === '__ALL__' || g.kelas === kelasFilter);
+  const pages = groups.map(g=>{
+    const rowsHtml = g.students.map((s,i)=>`
+      <tr><td class="c-no">${i+1}</td><td class="c-nama">${escapeHtml(s.nama)}</td><td class="c-kelas">${escapeHtml(s.tilawati||'-')}</td></tr>
+    `).join('');
+    return `
+    <section class="print-page">
+      <div class="edaran-head">
+        <img src="${LOGO1_DATA}" class="edaran-logo">
+        <div class="edaran-titles"><div class="edaran-title">KELAS ${escapeHtml(g.kelas.toUpperCase())}</div></div>
+        <img src="${LOGO2_DATA}" class="edaran-logo">
+      </div>
+      <div class="edaran-tanggal">${escapeHtml(tanggal)}</div>
+      <table class="print-table">
+        <thead><tr><th class="c-no">NO</th><th class="c-nama">NAMA LENGKAP</th><th class="c-kelas">TILAWATI</th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </section>`;
+  }).join('');
+
+  return `<!DOCTYPE html>
+<html lang="id"><head><meta charset="UTF-8"><title>Cetak Kelas</title>
+<style>
+  @page{ size:A4; margin:16mm; }
+  *{box-sizing:border-box;}
+  body{ font-family:'Cambria','Georgia',serif; color:#000; margin:0; }
+  .print-page{ page-break-after:always; }
+  .print-page:last-child{ page-break-after:auto; }
+  .edaran-head{ display:flex; align-items:center; justify-content:center; gap:16px; }
+  .edaran-logo{ width:52px; height:52px; object-fit:contain; }
+  .edaran-titles{ flex:1; text-align:center; }
+  .edaran-title{ font-size:22px; font-weight:bold; text-align:center; }
+  .edaran-tanggal{ font-size:12px; text-align:right; padding-bottom:6px; margin-bottom:12px; border-bottom:1px solid #000; }
+  .print-table{ width:100%; border-collapse:collapse; font-size:13px; }
+  .print-table th, .print-table td{ border:1px solid #000; padding:5px 9px; }
+  .print-table th{ font-weight:bold; text-align:center; }
+  .c-no{ width:44px; text-align:center; }
+  .c-nama{ text-align:left; }
+  .c-kelas{ width:110px; text-align:center; }
+</style></head>
+<body>${pages || '<p style="padding:30px;">Belum ada data siswa.</p>'}</body></html>`;
+}
+
 function doPrint(mode){
   let iframe = document.getElementById('printFrame');
   if(!iframe){
@@ -2324,7 +2547,9 @@ function doPrint(mode){
   }
   const doc = iframe.contentWindow.document;
   doc.open();
-  doc.write(mode === 'arsip' ? buildArsipPrintDocument() : buildPrintDocument(mode));
+  if(mode === 'arsip') doc.write(buildArsipPrintDocument());
+  else if(mode === 'kelas') doc.write(buildKelasPrintDocument(state.cetakKelas));
+  else doc.write(buildPrintDocument(mode));
   doc.close();
   iframe.onload = function(){
     iframe.contentWindow.focus();
@@ -2615,6 +2840,7 @@ async function importSiswaFromExcel(file){
         list.push({id:uid('s'), no:maxNo, nama:entry.nama, kelas:entry.kelas, tilawati:entry.tilawati});
       });
     });
+    await ensureAndPersistRoomAssignments();
     render();
     await showAlert(`${newEntries.length} siswa berhasil ditambahkan.`);
   }catch(e){
@@ -2661,6 +2887,7 @@ function bindSiswaEvents(){
       const maxNo = list.reduce((m,s)=>Math.max(m, s.no||0), 0);
       list.push({id:uid('s'), no:maxNo+1, nama, kelas, tilawati});
     });
+    await ensureAndPersistRoomAssignments();
     state.siswaSearch=''; state.siswaFilterLevel=''; state.siswaPage=1;
     render();
   });
@@ -2689,8 +2916,9 @@ function bindSiswaRowEvents(){
       const val = e.target.value;
       await safeListUpdate('siswa-list', 'siswaList', list=>{
         const s = list.find(x=>x.id===id);
-        if(s){ s.tilawati = val; s.roomOverride = ''; } // reset manual room when level changes
+        if(s){ s.tilawati = val; s.roomOverride = ''; s.assignedRoom = ''; s.assignedLevel = ''; } // level berubah, cari ruang tetap yang baru
       });
+      await ensureAndPersistRoomAssignments();
       render();
     });
     const ruanganSel = tr.querySelector('.siswa-ruangan');
@@ -2825,6 +3053,12 @@ function renderArsipTab(){
 }
 
 function bindCetakEvents(){
+  document.querySelectorAll('[data-cetakmode]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      state.cetakMode = el.getAttribute('data-cetakmode');
+      render();
+    });
+  });
   document.querySelectorAll('[data-cetaklevel]').forEach(el=>{
     el.addEventListener('click', ()=>{
       state.cetakLevel = el.getAttribute('data-cetaklevel');
@@ -2844,6 +3078,12 @@ function bindCetakEvents(){
   if(btnCetakSemua) btnCetakSemua.addEventListener('click', ()=>doPrint('all'));
   const btnCetakArsip = document.getElementById('btnCetakArsip');
   if(btnCetakArsip) btnCetakArsip.addEventListener('click', ()=>doPrint('arsip'));
+  const kelasSelect = document.getElementById('cetakKelasSelect');
+  if(kelasSelect){
+    kelasSelect.addEventListener('change', (e)=>{ state.cetakKelas = e.target.value; render(); });
+  }
+  const btnCetakKelas = document.getElementById('btnCetakKelas');
+  if(btnCetakKelas) btnCetakKelas.addEventListener('click', ()=>doPrint('kelas'));
 }
 
 /* ======================= KENAIKAN KELAS SERENTAK ======================= */
@@ -2882,6 +3122,7 @@ async function processKenaikanKelasSerentak(){
     const latestArchive = await storageGet('siswa-archive');
     const archiveList = (latestArchive && latestArchive.length) ? latestArchive.concat(archived) : archived;
 
+    sortSiswaListInPlace(remaining); // kelas sudah berubah semua, urutkan ulang
     await storageSet('siswa-list', remaining);
     await storageSet('siswa-archive', archiveList);
     state.siswaList = remaining;
@@ -2891,6 +3132,8 @@ async function processKenaikanKelasSerentak(){
     await showAlert('Terjadi kesalahan saat memproses kenaikan kelas. Coba lagi.');
     return;
   }
+  // Siswa yang baru jadi kelas 6 perlu dikunci ke ruang kelas asal mereka.
+  await ensureAndPersistRoomAssignments();
   setSaving(false);
   render();
   await showAlert(`Selesai. ${promotedCount} siswa naik kelas, ${archivedCount} siswa (kelas 6) diarsipkan.`);
@@ -3130,6 +3373,12 @@ async function startApp(){
     state.loaded = true;
   }
   render();
+  if(state.role === 'admin'){
+    // Kunci ruang untuk siswa yang belum punya ruang tetap (baru login/refresh),
+    // lalu render ulang kalau ada perubahan supaya tampilan langsung sesuai.
+    await ensureAndPersistRoomAssignments();
+    render();
+  }
 }
 
 applyLogoImages();
