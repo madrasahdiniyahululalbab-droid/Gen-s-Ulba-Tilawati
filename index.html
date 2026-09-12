@@ -526,6 +526,16 @@
   </div>
 </div>
 
+<!-- ===================== RIWAYAT INFO MODAL ===================== -->
+<div id="riwayatInfoOverlay" class="modal-overlay hidden">
+  <div class="modal-box" style="max-width:480px; text-align:left;">
+    <div id="riwayatInfoBody"></div>
+    <div class="modal-buttons" style="justify-content:flex-end; margin-top:16px;">
+      <button class="btn btn-outline" id="btnTutupRiwayatInfo">Tutup</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
@@ -620,6 +630,7 @@ const state = {
   cetakRoom: '__ALL__',
   cetakMode: 'ruangan', // 'ruangan' | 'kelas'
   cetakKelas: '__ALL__',
+  riwayatInfoId: '', // id record riwayat yang lagi dibuka panel info-nya
 
   // auth
   role: null,          // 'admin' | 'penguji'
@@ -2039,7 +2050,7 @@ function buildRiwayatTableHtml(list){
       <td>${escapeHtml(r.penguji)}</td>
       <td>
         <div style="display:flex; align-items:center; gap:10px;">
-          <button class="btn btn-outline btn-icon-circle riwayat-print" data-id="${r.id}" title="Cetak">&#128424;</button>
+          <button class="btn btn-outline btn-icon-circle riwayat-info" data-id="${r.id}" title="Info">&#8505;</button>
           ${state.role==='admin' ? `<button class="btn btn-danger btn-icon-circle riwayat-del" data-id="${r.id}" title="Hapus">&#128465;</button>` : ''}
         </div>
       </td>
@@ -2088,10 +2099,10 @@ function bindRiwayatEvents(){
 }
 
 function bindRiwayatRowEvents(){
-  document.querySelectorAll('.riwayat-print').forEach(btn=>{
+  document.querySelectorAll('.riwayat-info').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const record = state.penilaianList.find(r=>r.id===btn.getAttribute('data-id'));
-      if(record) printBlankoPenilaian(record);
+      if(record) showRiwayatInfoModal(record);
     });
   });
   document.querySelectorAll('.riwayat-del').forEach(btn=>{
@@ -2103,6 +2114,72 @@ function bindRiwayatRowEvents(){
     });
   });
 }
+
+// Panel Info per catatan Riwayat Penilaian: status siswa (kelas, tingkatan,
+// ruang), tombol Cetak (dipindah dari baris tabel), dan - KHUSUS kalau siswa
+// itu hasilnya "Naik" - fitur rekomendasi ruang supaya admin bisa cek apakah
+// penempatan otomatis sudah pas atau perlu diubah manual.
+function showRiwayatInfoModal(record){
+  const siswa = state.siswaList.find(s=>s.id === record.siswaId);
+  const currentRoom = siswa ? getRoomForSiswaId(siswa.id) : null;
+  const isNaik = record.hasil.startsWith('Naik');
+
+  let rekomendasiHtml = '';
+  if(isNaik && siswa){
+    const rec = getRoomRecommendation(siswa);
+    rekomendasiHtml = `
+      <div style="border-top:1px solid var(--border); margin-top:14px; padding-top:14px;">
+        <div style="font-weight:700; margin-bottom:8px;">Rekomendasi Ruang</div>
+        ${rec ? `
+          <div style="font-size:15px; font-weight:700; color:var(--teal-dark);">${escapeHtml(rec.room)}</div>
+          <div style="font-size:12.5px; color:var(--ink-muted); margin-top:4px;">
+            ${rec.totalSiswa}/${rec.quota} siswa di ruang ini
+            ${rec.temanSekelas > 0 ? ` &middot; <strong>${rec.temanSekelas} teman sekelas</strong> ada di sana` : ' &middot; belum ada teman sekelas di sana'}
+            ${rec.penuh ? ' &middot; <span style="color:var(--rose);">ruang ini sudah penuh, tapi paling pas dibanding yang lain</span>' : ''}
+          </div>
+          ${rec.room !== currentRoom ? `<button class="btn btn-primary btn-sm" id="btnTerapkanRekomendasiRiwayat" data-siswa-id="${siswa.id}" data-room="${escapeAttr(rec.room)}" style="margin-top:10px;">Terapkan Rekomendasi Ini</button>` : `<div style="font-size:12px; color:#2E9E5B; margin-top:8px;">&#10003; Sudah sesuai rekomendasi.</div>`}
+        ` : `<div style="font-size:12.5px; color:var(--ink-muted);">Belum ada ruangan untuk tingkat ${escapeHtml(record.tingkatBaru)}.</div>`}
+      </div>
+    `;
+  }
+
+  document.getElementById('riwayatInfoBody').innerHTML = `
+    <h2 class="section-title" style="margin-bottom:10px;">${escapeHtml(record.siswaNama)}</h2>
+    <div style="display:grid; grid-template-columns:auto 1fr; gap:6px 14px; font-size:13.5px;">
+      <div style="color:var(--ink-muted);">Kelas</div><div>${escapeHtml(record.kelas || '-')}</div>
+      <div style="color:var(--ink-muted);">Tingkatan diuji</div><div>${escapeHtml(record.tingkatSaat)}</div>
+      <div style="color:var(--ink-muted);">Hasil</div><div>${escapeHtml(record.hasil)}</div>
+      <div style="color:var(--ink-muted);">Ruang saat ini</div><div>${currentRoom ? escapeHtml(currentRoom) : '— belum ada —'}</div>
+    </div>
+    ${rekomendasiHtml}
+    <button class="btn btn-outline" id="btnCetakDariInfo" data-id="${record.id}" style="margin-top:16px;">&#128424; Cetak Lembar Penilaian</button>
+  `;
+
+  document.getElementById('riwayatInfoOverlay').classList.remove('hidden');
+
+  document.getElementById('btnCetakDariInfo').addEventListener('click', ()=>{
+    printBlankoPenilaian(record);
+  });
+  const btnTerapkan = document.getElementById('btnTerapkanRekomendasiRiwayat');
+  if(btnTerapkan){
+    btnTerapkan.addEventListener('click', async ()=>{
+      const sId = btnTerapkan.getAttribute('data-siswa-id');
+      const room = btnTerapkan.getAttribute('data-room');
+      await safeListUpdate('siswa-list', 'siswaList', list=>{
+        const s = list.find(x=>x.id===sId); if(s) s.roomOverride = room;
+      });
+      document.getElementById('riwayatInfoOverlay').classList.add('hidden');
+      await showAlert('Ruang berhasil diterapkan.');
+    });
+  }
+}
+
+document.getElementById('btnTutupRiwayatInfo').addEventListener('click', ()=>{
+  document.getElementById('riwayatInfoOverlay').classList.add('hidden');
+});
+document.getElementById('riwayatInfoOverlay').addEventListener('click', (e)=>{
+  if(e.target.id === 'riwayatInfoOverlay') e.currentTarget.classList.add('hidden');
+});
 
 /* ======================= CETAK BLANKO PENILAIAN (A4, sesuai template resmi) =======================
    Mencetak HANYA bagian tingkat Tilawati yang diuji siswa tersebut - bukan seluruh
@@ -2381,6 +2458,52 @@ function getRoomForSiswaId(siswaId){
     if(r.students.some(s=>s.id===siswaId)) return r.room;
   }
   return null;
+}
+
+// Cari rekomendasi ruang untuk seorang siswa - TIDAK menyimpan apapun, cuma
+// hitungan saran. Diutamakan ruang (dalam tingkat Tilawati siswa itu) yang
+// sudah ada teman sekelas (kelas asal sama) dan masih ada kapasitas.
+// Kembalikan juga info jumlah siswa & teman sekelas di ruang itu untuk
+// ditampilkan sebagai keterangan (bukan cuma nama ruangnya saja).
+function getRoomRecommendation(student){
+  if(!student.tilawati) return null;
+  const level = LEVELS.find(l=>l.label === student.tilawati);
+  if(!level) return null;
+  const rooms = getRoomsForLevel(level.kode);
+  if(rooms.length === 0) return null;
+
+  const roomBuckets = rooms.map(r=>({
+    room:r, quota:getQuotaForRoom(r), students:[]
+  }));
+  state.siswaList.forEach(s=>{
+    if(s.id === student.id || s.tilawati !== student.tilawati) return;
+    const room = s.roomOverride || s.assignedRoom;
+    if(!room) return;
+    const bucket = roomBuckets.find(b=>b.room===room);
+    if(bucket) bucket.students.push(s);
+  });
+
+  let best = null;
+  roomBuckets.forEach(b=>{
+    const sameKelasCount = b.students.filter(s=>s.kelas === student.kelas).length;
+    const full = b.students.length >= b.quota;
+    if(!best){ best = {bucket:b, sameKelasCount, full}; return; }
+    // Diutamakan: belum penuh > lebih banyak teman sekelas > paling longgar.
+    if(best.full && !full){ best = {bucket:b, sameKelasCount, full}; return; }
+    if(full === best.full){
+      if(sameKelasCount > best.sameKelasCount || (sameKelasCount === best.sameKelasCount && b.students.length < best.bucket.students.length)){
+        best = {bucket:b, sameKelasCount, full};
+      }
+    }
+  });
+  if(!best) return null;
+  return {
+    room: best.bucket.room,
+    totalSiswa: best.bucket.students.length,
+    quota: best.bucket.quota,
+    temanSekelas: best.sameKelasCount,
+    penuh: best.full
+  };
 }
 
 /* ---- CETAK: mengikuti format resmi "Edaran Kelas Tilawati" sekolah ---- */
