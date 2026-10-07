@@ -2522,30 +2522,36 @@ function printBlankoPenilaian(record){
 
 /* ======================= CETAK LAPORAN ======================= */
 function renderCetakPage(){
-  if(isTahfidz()){
-    return `
-      <div class="banner info">
-        <span>&#8505;</span>
-        <div>Cetak Laporan (daftar siswa per ruangan/kelas &amp; Arsip) untuk Tahfidz belum tersedia di versi ini - menyusul. Sementara ini, pakai <strong>Cetak Posisi Ruangan</strong> di halaman Data Guru, atau cetak Lembar Penilaian per siswa dari halaman Riwayat Penilaian.</div>
-      </div>
-    `;
-  }
-  const modeTabs = `
+  const tahfidzMode = isTahfidz();
+  const levelField = siswaLevelField();
+  const lbl = programLabel();
+
+  // Mode Tahfidz: hanya "Cetak Ruangan" yang tersedia untuk saat ini. "Cetak
+  // Kelas" dan "Arsip" belum dibuat untuk Tahfidz (Arsip perlu fitur Naikkan
+  // Serentak yang juga belum ada untuk Tahfidz) - supaya tidak menjalankan
+  // logika Tilawati yang salah data.
+  const modeTabs = tahfidzMode ? '' : `
     <div class="cetak-mode-tabs">
       <div class="cetak-mode-tab ${state.cetakMode==='ruangan'?'active':''}" data-cetakmode="ruangan">Cetak Ruangan</div>
       <div class="cetak-mode-tab ${state.cetakMode==='kelas'?'active':''}" data-cetakmode="kelas">Cetak Kelas</div>
     </div>
   `;
 
-  if(state.cetakMode === 'kelas'){
+  if(!tahfidzMode && state.cetakMode === 'kelas'){
     return modeTabs + renderCetakKelasTab();
   }
 
-  if(state.cetakLevel === '__ARSIP__'){
+  if(!tahfidzMode && state.cetakLevel === '__ARSIP__'){
     return modeTabs + renderArsipTab();
   }
 
   const merged = getMergedRoomAssignments();
+  // Kalau baru pindah dari mode Tilawati, cetakLevel bisa berisi label yang
+  // tidak ada di Tahfidz (atau sebaliknya) - reset ke tingkat pertama supaya
+  // tab yang aktif selalu valid untuk program saat ini.
+  if(!activeLevels().find(l=>l.label===state.cetakLevel)){
+    state.cetakLevel = activeLevels()[0].label;
+  }
   // Ruangan yang relevan untuk tab tingkatan yang dipilih (buat navigasi saja) -
   // tapi daftar siswa yang ditampilkan/dicetak SELALU daftar gabungan penuh
   // ruang itu (semua tingkatan yang ada di situ), supaya ruang campur tidak
@@ -2554,10 +2560,10 @@ function renderCetakPage(){
   if(!merged.find(r=>r.room===state.cetakRoom) && state.cetakRoom !== '__ALL__'){
     state.cetakRoom = '__ALL__';
   }
-  const tabs = LEVELS.map(l=>`
+  const tabs = activeLevels().map(l=>`
     <div class="level-tab ${state.cetakLevel===l.label?'active':''}" data-cetaklevel="${l.label}">${l.label}</div>
   `).join('')
-    + `<div class="level-tab ${state.cetakLevel==='__ARSIP__'?'active':''}" data-cetaklevel="__ARSIP__">Arsip</div>`;
+    + (tahfidzMode ? '' : `<div class="level-tab ${state.cetakLevel==='__ARSIP__'?'active':''}" data-cetaklevel="__ARSIP__">Arsip</div>`);
 
   const roomOptions = `<option value="__ALL__">Semua ruangan (${state.cetakLevel})</option>` +
     roomsForTab.map(r=>`<option value="${escapeAttr(r.room)}" ${state.cetakRoom===r.room?'selected':''}>Ruang ${r.room} (${r.students.length} siswa)${r.levels.length>1?' — campur '+r.levels.join(' & '):''}</option>`).join('');
@@ -2569,7 +2575,7 @@ function renderCetakPage(){
         <select id="cetakRoomSelect" style="width:260px;">${roomOptions}</select>
         <button class="btn btn-primary" id="btnCetak">&#128424; Cetak</button>
         <button class="btn btn-outline" id="btnCsv">&#8681; Excel</button>
-        <button class="btn btn-outline" id="btnCetakSemua">&#128424; Cetak Semua Data</button>
+        ${tahfidzMode ? '' : '<button class="btn btn-outline" id="btnCetakSemua">&#128424; Cetak Semua Data</button>'}
       </div>
       <div style="margin-top:14px;">
         ${roomsForTab.length===0 ? `<div class="empty-state">Belum ada ruangan untuk tingkatan ini.</div>` :
@@ -2582,8 +2588,8 @@ function renderCetakPage(){
               </div>
               <div class="table-scroll" style="max-height:220px;">
                 <table class="data-table">
-                  <thead><tr><th style="width:44px;">No</th><th>Nama</th><th style="width:90px;">Kelas</th>${r.levels.length>1?'<th style="width:110px;">Tilawati</th>':''}</tr></thead>
-                  <tbody>${r.students.map((s,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(s.nama)}</td><td>${escapeHtml(s.kelas||'')}</td>${r.levels.length>1?`<td>${escapeHtml(s.tilawati)}</td>`:''}</tr>`).join('')}</tbody>
+                  <thead><tr><th style="width:44px;">No</th><th>Nama</th><th style="width:90px;">Kelas</th>${r.levels.length>1?`<th style="width:110px;">${escapeHtml(lbl)}</th>`:''}</tr></thead>
+                  <tbody>${r.students.map((s,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(s.nama)}</td><td>${escapeHtml(s.kelas||'')}</td>${r.levels.length>1?`<td>${escapeHtml(s[levelField])}</td>`:''}</tr>`).join('')}</tbody>
                 </table>
               </div>
             </div>
@@ -2725,6 +2731,8 @@ function buildPrintDocument(mode){
   const roomsForTab = merged.filter(r => r.levels.includes(state.cetakLevel));
   const targetRooms = mode === 'all' ? merged : (state.cetakRoom === '__ALL__' ? roomsForTab : merged.filter(r=>r.room===state.cetakRoom));
   const tanggal = formatTanggalIndo(new Date());
+  const levelField = siswaLevelField();
+  const lblUpper = programLabel().toUpperCase();
 
   const pages = targetRooms.map(r=>{
     const quota = getQuotaForRoom(r.room);
@@ -2732,11 +2740,11 @@ function buildPrintDocument(mode){
     let rowsHtml = '';
     for(let i=0;i<rowCount;i++){
       const s = r.students[i];
-      const tilawatiCell = r.levels.length>1 ? `<td class="c-tilawati">${s?escapeHtml(s.tilawati):''}</td>` : '';
+      const tilawatiCell = r.levels.length>1 ? `<td class="c-tilawati">${s?escapeHtml(s[levelField]):''}</td>` : '';
       rowsHtml += `<tr><td class="c-no">${i+1}</td><td class="c-nama">${s?escapeHtml(s.nama):''}</td><td class="c-kelas">${s?escapeHtml(s.kelas||''):''}</td>${tilawatiCell}</tr>`;
     }
     const levelTitle = r.levels.length>1
-      ? `TILAWATI ${r.levels.map(l=>escapeHtml(l.replace('Tilawati ',''))).join(' & ')}`
+      ? `${lblUpper} ${r.levels.map(l=>escapeHtml(l.replace('Tilawati ',''))).join(' & ')}`
       : escapeHtml((mode==='all' ? r.levels[0]||'' : state.cetakLevel).toUpperCase());
     return `
     <section class="print-page">
@@ -2758,7 +2766,7 @@ function buildPrintDocument(mode){
   }).join('');
 
   return `<!DOCTYPE html>
-<html lang="id"><head><meta charset="UTF-8"><title>Cetak Edaran Kelas Tilawati</title>
+<html lang="id"><head><meta charset="UTF-8"><title>Cetak Edaran Kelas ${escapeHtml(programLabel())}</title>
 <style>
   @page{ size:A4; margin:16mm; }
   *{box-sizing:border-box;}
@@ -3083,7 +3091,7 @@ async function doExcelExport(){
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `Edaran_Tilawati_${state.cetakLevel.replace(/[^a-zA-Z0-9]/g,'_')}_${state.cetakRoom==='__ALL__'?'semua_ruang':state.cetakRoom.replace(/[^a-zA-Z0-9]/g,'_')}.xlsx`;
+  a.download = `Edaran_${programLabel()}_${state.cetakLevel.replace(/[^a-zA-Z0-9]/g,'_')}_${state.cetakRoom==='__ALL__'?'semua_ruang':state.cetakRoom.replace(/[^a-zA-Z0-9]/g,'_')}.xlsx`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
