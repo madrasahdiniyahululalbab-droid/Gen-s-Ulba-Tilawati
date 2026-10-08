@@ -416,8 +416,8 @@
   .login-logos img{width:100%; max-width:290px; height:auto; object-fit:contain; display:block;}
   .program-switch{display:flex; gap:8px; margin:0 0 4px;}
   .program-switch .program-opt{
-    flex:1; padding:11px 10px; border:1.5px solid var(--border); border-radius:10px;
-    background:var(--bg); color:var(--ink-muted); font-family:var(--font-body); font-size:14px; font-weight:600;
+    flex:1; padding:11px 6px; border:1.5px solid var(--border); border-radius:10px;
+    background:var(--bg); color:var(--ink-muted); font-family:var(--font-body); font-size:13px; font-weight:600;
     cursor:pointer; transition:all .15s;
   }
   .program-switch .program-opt:hover{border-color:var(--teal); color:var(--ink);}
@@ -475,6 +475,7 @@
       <div class="program-switch" id="programSwitch">
         <button type="button" class="program-opt active" data-program="tilawati">&#128214; Tilawati</button>
         <button type="button" class="program-opt" data-program="tahfidz">&#128213; Tahfidz</button>
+        <button type="button" class="program-opt" data-program="administrator">Administrator</button>
       </div>
       <form id="loginForm">
         <label class="login-label">Email (atau Username lama)</label>
@@ -633,12 +634,15 @@ const LEVELS_TAHFIDZ = [
   {label:'Munaqis 5', kode:'GTh5'},
   {label:'Munaqis 6', kode:'GTh6'},
   {label:'Takhasus', kode:'GTs'},
+  {label:'Inklusi', kode:'GI'},
 ];
 const LEVEL_LABELS_TAHFIDZ = LEVELS_TAHFIDZ.map(l=>l.label);
 // PTh = Team Penguji Tahfidz, sejajar dengan "PT" di Tilawati - tidak
 // terikat ruangan/tingkat tetap, makanya TIDAK masuk LEVELS_TAHFIDZ (yang
 // dipakai untuk pembagian ruangan), hanya masuk daftar kode guru & cetak.
-const KODE_LIST_TAHFIDZ = ['GTh1','GTh2','GTh3','GTh4','GTh5','GTh6','GTs','PTh'];
+const KODE_LIST_TAHFIDZ = ['GTh1','GTh2','GTh3','GTh4','GTh5','GTh6','GTs','GI','PTh'];
+// Tingkat Tahfidz yang tidak punya format uji terstruktur (tidak muncul di Uji Kenaikan).
+const LEVEL_TANPA_UJI_TAHFIDZ = ['Takhasus','Inklusi'];
 
 const GURU_PRINT_GROUPS_TAHFIDZ = [
   {kode:'PTh', label:'PTh — Team Penguji'},
@@ -649,6 +653,7 @@ const GURU_PRINT_GROUPS_TAHFIDZ = [
   {kode:'GTh5', label:'GTh 5 — Guru Tahfidz Munaqis 5'},
   {kode:'GTh6', label:'GTh 6 — Guru Tahfidz Munaqis 6'},
   {kode:'GTs', label:'GTs — Guru Takhasus'},
+  {kode:'GI', label:'GI — Guru Inklusi'},
 ];
 const DEFAULT_QUOTA_TAHFIDZ = 35;
 
@@ -676,6 +681,20 @@ const NAV_ITEMS = [
 ];
 // Halaman yang untuk role 'penguji' hanya bisa DILIHAT, tidak bisa diedit.
 const VIEW_ONLY_FOR_PENGUJI = ['dashboard','siswa','guru','pembagian'];
+// Menu mode ADMINISTRATOR (satu peran untuk mengelola semua data kedua program).
+const ADMIN_NAV_ITEMS = [
+  {id:'dashboard', label:'Ringkasan', icon:'&#9673;'},
+  {id:'adm-siswa', label:'Data Siswa (Gabungan)', icon:'&#9782;'},
+  {id:'siswa', label:'Tambah / Impor Siswa', icon:'&#10133;'},
+  {id:'guru', label:'Data Guru', icon:'&#9737;'},
+  {id:'pembagian', label:'Pembagian Ruangan', icon:'&#9638;'},
+  {id:'kuota', label:'Pengaturan Kuota', icon:'&#9881;'},
+  {id:'cetak', label:'Cetak Laporan', icon:'&#128424;'},
+  {id:'uji', label:'Uji Kenaikan Siswa', icon:'&#9998;'},
+  {id:'riwayat', label:'Riwayat Penilaian', icon:'&#128220;'},
+  {id:'adm-kenaikan', label:'Kenaikan & Arsip', icon:'&#8593;'},
+  {id:'adm-backup', label:'Backup & Pemulihan', icon:'&#128190;'},
+];
 function isReadOnly(){
   return state.role === 'penguji' && VIEW_ONLY_FOR_PENGUJI.includes(state.view);
 }
@@ -769,6 +788,8 @@ const state = {
   // Uji & Cetak - tanpa mengubah data siswa induk (siswa-list tetap satu,
   // shared antara dua program).
   program: null,
+  adminMode: false,
+  loginMode: 'tilawati',
 
   view: 'dashboard',
   siswaList: [],
@@ -1442,13 +1463,16 @@ const PAGE_META = {
   cetak:{title:'Cetak Laporan', sub:'Cetak atau unduh daftar siswa per ruangan'},
   uji:{title:'Uji Kenaikan Siswa', sub:'Isi blanko penilaian Tilawati sesuai tingkatan siswa'},
   riwayat:{title:'Riwayat Penilaian', sub:'Rekap hasil uji kenaikan yang sudah diinput'},
+  'adm-siswa':{title:'Data Siswa (Gabungan)', sub:'Semua siswa, kedua program, dengan edit & hapus massal'},
+  'adm-kenaikan':{title:'Kenaikan Kelas & Arsip', sub:'Naikkan kelas serentak dan kelola siswa yang diarsipkan'},
+  'adm-backup':{title:'Backup & Pemulihan', sub:'Unduh cadangan seluruh data atau pulihkan dari cadangan'},
 };
 
 let lastAnimatedView = null;
 
 function renderNav(){
   const nav = document.getElementById('navList');
-  const items = NAV_ITEMS.filter(item=>item.roles.includes(state.role));
+  const items = state.adminMode ? ADMIN_NAV_ITEMS : NAV_ITEMS.filter(item=>item.roles.includes(state.role));
   nav.innerHTML = items.map(item=>`
     <div class="nav-item ${state.view===item.id?'active':''}" data-nav="${item.id}">
       <span class="nav-icon">${item.icon}</span><span>${item.label}</span>
@@ -1466,9 +1490,10 @@ function renderNav(){
 
 function setPage(){
   const meta = PAGE_META[state.view];
-  const suffix = isTahfidz() ? ' — Tahfidz' : '';
+  const isAdm = state.view.startsWith('adm-');
+  const suffix = (isTahfidz() && !isAdm) ? ' — Tahfidz' : '';
   document.getElementById('pageTitle').textContent = meta.title + suffix;
-  document.getElementById('pageSub').textContent = meta.sub.replace(/Tilawati/g, programLabel());
+  document.getElementById('pageSub').textContent = isAdm ? meta.sub : meta.sub.replace(/Tilawati/g, programLabel());
 }
 
 // Update avatar/nama di navbar atas + isi dropdown notifikasi (riwayat terbaru).
@@ -1504,8 +1529,9 @@ function updateTopbarWidgets(){
 }
 
 function render(){
-  const navItem = NAV_ITEMS.find(i=>i.id===state.view);
-  if(!navItem || !navItem.roles.includes(state.role)){
+  const navList = state.adminMode ? ADMIN_NAV_ITEMS : NAV_ITEMS;
+  const navItem = navList.find(i=>i.id===state.view);
+  if(!navItem || (!state.adminMode && !navItem.roles.includes(state.role))){
     state.view = state.role === 'admin' ? 'dashboard' : 'uji';
   }
   renderNav();
@@ -1520,6 +1546,9 @@ function render(){
   else if(state.view === 'cetak') c.innerHTML = renderCetakPage();
   else if(state.view === 'uji') c.innerHTML = renderUjiPage();
   else if(state.view === 'riwayat') c.innerHTML = renderRiwayatPage();
+  else if(state.view === 'adm-siswa') c.innerHTML = renderAdmSiswaPage();
+  else if(state.view === 'adm-kenaikan') c.innerHTML = renderAdmKenaikanPage();
+  else if(state.view === 'adm-backup') c.innerHTML = renderAdmBackupPage();
   // Animasi cuma dipicu saat BERPINDAH menu (bukan tiap kali render dipanggil),
   // supaya tidak mengganggu saat mengetik/update data di halaman yang sama.
   if(lastAnimatedView !== state.view){
@@ -1540,6 +1569,7 @@ function render(){
   }else{
     bindViewEvents();
   }
+  if(state.adminMode) addProgramTabs(c);
 }
 
 // Ganti field EDIT per-baris (di dalam tbody) jadi teks biasa - ini yang
@@ -1803,7 +1833,7 @@ function renderGuruPage(){
   const kodeOptions = activeKodeList().map(k=>`<option value="${k}">${k}</option>`).join('');
   const rows = buildGuruTableHtml(filtered);
   const bannerText = isTahfidz()
-    ? 'Kode <strong>GTh1-GTh6</strong> = Guru Tahfidz sesuai Munaqis-nya, <strong>GTs</strong> = Guru Takhasus, <strong>PTh</strong> = Team Penguji (tidak terikat ruangan tetap). Ubah "Ruangan" untuk memindahkan guru — perubahan otomatis berlaku ke Pembagian Ruangan Tahfidz.'
+    ? 'Kode <strong>GTh1-GTh6</strong> = Guru Tahfidz sesuai Munaqis-nya, <strong>GTs</strong> = Guru Takhasus, <strong>GI</strong> = Guru Inklusi, <strong>PTh</strong> = Team Penguji (tidak terikat ruangan tetap). Ubah "Ruangan" untuk memindahkan guru — perubahan otomatis berlaku ke Pembagian Ruangan Tahfidz.'
     : 'Kode <strong>GT1-GT6</strong> = Guru Tilawati sesuai angka tingkatannya, <strong>GAQ</strong> = Guru Al-Qur\'an, <strong>GI</strong> = Guru Inklusi, <strong>PT</strong> = Penguji Test (tidak terikat ruangan tetap). Ubah "Ruangan" untuk memindahkan guru — perubahan otomatis berlaku ke Data Siswa &amp; Pembagian Ruangan.';
 
   return `
@@ -1979,7 +2009,7 @@ function initUjiForm(tingkat, siswaId){
 function renderUjiPage(){
   const levelField = siswaLevelField();
   const eligibleSiswa = state.siswaList
-    .filter(s=>s[levelField] && !(isTahfidz() && s[levelField]==='Takhasus'))
+    .filter(s=>s[levelField] && !(isTahfidz() && LEVEL_TANPA_UJI_TAHFIDZ.includes(s[levelField])))
     .slice()
     .sort((a,b)=>a.nama.localeCompare(b.nama));
 
@@ -2094,7 +2124,7 @@ function renderUjiResultsOnly(){
   if(!resultsBox) return;
   const levelField = siswaLevelField();
   const eligibleSiswa = state.siswaList
-    .filter(s=>s[levelField] && !(isTahfidz() && s[levelField]==='Takhasus'))
+    .filter(s=>s[levelField] && !(isTahfidz() && LEVEL_TANPA_UJI_TAHFIDZ.includes(s[levelField])))
     .slice()
     .sort((a,b)=>a.nama.localeCompare(b.nama));
   const q = (state.ujiSiswaSearch||'').trim().toLowerCase();
@@ -2852,7 +2882,7 @@ function buildPrintDocument(mode){
 function buildArsipPrintDocument(){
   const tanggal = formatTanggalIndo(new Date());
   const rowsHtml = state.siswaArchive.map((s,i)=>`
-    <tr><td class="c-no">${i+1}</td><td class="c-nama">${escapeHtml(s.nama)}</td><td class="c-kelas">${escapeHtml(s.kelasSaatArsip||s.kelas||'')}</td><td class="c-kelas">${escapeHtml(s.tilawati||'')}</td><td class="c-kelas">${escapeHtml(s.tanggalArsip||'')}</td></tr>
+    <tr><td class="c-no">${i+1}</td><td class="c-nama">${escapeHtml(s.nama)}</td><td class="c-kelas">${escapeHtml(s.kelasSaatArsip||s.kelas||'')}</td><td class="c-kelas">${escapeHtml(s.tilawati||'')}</td><td class="c-kelas">${escapeHtml(s.tahfidz||'')}</td><td class="c-kelas">${escapeHtml(s.tanggalArsip||'')}</td></tr>
   `).join('');
 
   return `<!DOCTYPE html>
@@ -2881,8 +2911,8 @@ function buildArsipPrintDocument(){
   </div>
   <div class="edaran-tanggal">${escapeHtml(tanggal)}</div>
   <table class="print-table">
-    <thead><tr><th class="c-no">NO</th><th class="c-nama">NAMA</th><th class="c-kelas">KELAS TERAKHIR</th><th class="c-kelas">TILAWATI TERAKHIR</th><th class="c-kelas">TGL ARSIP</th></tr></thead>
-    <tbody>${rowsHtml || '<tr><td colspan="5">Belum ada data arsip.</td></tr>'}</tbody>
+    <thead><tr><th class="c-no">NO</th><th class="c-nama">NAMA</th><th class="c-kelas">KELAS TERAKHIR</th><th class="c-kelas">TILAWATI TERAKHIR</th><th class="c-kelas">TAHFIDZ TERAKHIR</th><th class="c-kelas">TGL ARSIP</th></tr></thead>
+    <tbody>${rowsHtml || '<tr><td colspan="6">Belum ada data arsip.</td></tr>'}</tbody>
   </table>
 </body></html>`;
 }
@@ -3294,6 +3324,9 @@ function bindViewEvents(){
   else if(state.view === 'uji') bindUjiEvents();
   else if(state.view === 'riwayat') bindRiwayatEvents();
   else if(state.view === 'dashboard') bindDashboardEvents();
+  else if(state.view === 'adm-siswa') bindAdmSiswaEvents();
+  else if(state.view === 'adm-kenaikan') bindAdmKenaikanEvents();
+  else if(state.view === 'adm-backup') bindAdmBackupEvents();
 }
 
 function bindDashboardEvents(){
@@ -3675,6 +3708,7 @@ function renderArsipTab(){
       <td>${escapeHtml(s.nama)}</td>
       <td>${escapeHtml(s.kelasSaatArsip||s.kelas||'')}</td>
       <td>${escapeHtml(s.tilawati||'')}</td>
+      <td>${escapeHtml(s.tahfidz||'')}</td>
       <td>${escapeHtml(s.tanggalArsip||'')}</td>
     </tr>
   `).join('');
@@ -3692,8 +3726,8 @@ function renderArsipTab(){
       </div>
       <div class="table-scroll" style="margin-top:14px;">
         <table class="data-table">
-          <thead><tr><th style="width:44px;">No</th><th>Nama</th><th>Kelas Terakhir</th><th>Tilawati Terakhir</th><th>Tgl Arsip</th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="5"><div class="empty-state">Belum ada data arsip.</div></td></tr>`}</tbody>
+          <thead><tr><th style="width:44px;">No</th><th>Nama</th><th>Kelas Terakhir</th><th>Tilawati Terakhir</th><th>Tahfidz Terakhir</th><th>Tgl Arsip</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="6"><div class="empty-state">Belum ada data arsip.</div></td></tr>`}</tbody>
         </table>
       </div>
     </div>
@@ -3735,7 +3769,8 @@ function bindCetakEvents(){
 }
 
 /* ======================= KENAIKAN KELAS SERENTAK ======================= */
-async function processKenaikanKelasSerentak(){
+async function processKenaikanKelasSerentak(skipConfirm){
+  if(skipConfirm !== true){
   const confirm1 = await showConfirm(
     `Naikkan kelas ${state.siswaList.length} siswa sekaligus? Data siswa dipakai bersama Tilawati dan Tahfidz, jadi kelas SEMUA siswa (termasuk siswa Tahfidz) ikut naik. Kelas 6 akan diarsipkan.`,
     'Ya, Lanjutkan'
@@ -3743,6 +3778,7 @@ async function processKenaikanKelasSerentak(){
   if(!confirm1) return;
   const confirm2 = await showConfirm('Yakin? Proses ini langsung berjalan.', 'Ya, Proses Sekarang');
   if(!confirm2) return;
+  }
 
   setSaving(true);
   let promotedCount = 0, archivedCount = 0;
@@ -3781,11 +3817,333 @@ async function processKenaikanKelasSerentak(){
     await showAlert('Terjadi kesalahan saat memproses kenaikan kelas. Coba lagi.');
     return;
   }
-  // Siswa yang baru jadi kelas 6 perlu dikunci ke ruang kelas asal mereka.
-  await ensureAndPersistRoomAssignments();
+  // Siswa yang baru jadi kelas 6 perlu dikunci ke ruang kelas asal mereka (kedua program).
+  await ensureRoomsBothPrograms();
   setSaving(false);
   render();
   await showAlert(`Selesai. ${promotedCount} siswa naik kelas, ${archivedCount} siswa (kelas 6) diarsipkan.`);
+}
+
+/* ======================= ADMINISTRATOR (kelola semua data) ======================= */
+const ADMIN_PROGRAM_VIEWS = ['dashboard','siswa','guru','pembagian','kuota','cetak','uji','riwayat'];
+
+// Kunci ruang untuk KEDUA program (ensureAndPersistRoomAssignments hanya bekerja untuk program aktif).
+async function ensureRoomsBothPrograms(){
+  const prev = state.program;
+  try{
+    for(const p of ['tilawati','tahfidz']){ state.program = p; await ensureAndPersistRoomAssignments(); }
+  }finally{ state.program = prev; }
+}
+
+// Tab "Program Tilawati | Program Tahfidz" di atas halaman yang datanya per-program.
+function addProgramTabs(c){
+  if(!ADMIN_PROGRAM_VIEWS.includes(state.view)) return;
+  const bar = document.createElement('div');
+  bar.className = 'level-tabs';
+  bar.style.marginBottom = '14px';
+  bar.innerHTML = ['tilawati','tahfidz'].map(p=>`<div class="level-tab ${state.program===p?'active':''}" data-admprog="${p}">Program ${p==='tahfidz'?'Tahfidz':'Tilawati'}</div>`).join('');
+  c.prepend(bar);
+  bar.querySelectorAll('[data-admprog]').forEach(el=>el.addEventListener('click', async ()=>{
+    const p = el.getAttribute('data-admprog');
+    if(p === state.program) return;
+    state.program = p;
+    try{ sessionStorage.setItem('gens-ulba-program-tab', p); }catch(e){ /* abaikan */ }
+    state.ujiSiswaId = ''; state.ujiSiswaSearch = ''; state.ujiForm = null;
+    await ensureAndPersistRoomAssignments();
+    render();
+  }));
+}
+
+// Konfirmasi dengan mengetik kata tertentu (+ opsi unduh cadangan dulu). Mengembalikan {ok, backup}.
+function showTypedConfirm(message, word, opts){
+  opts = opts || {};
+  return new Promise(resolve=>{
+    const overlay = document.getElementById('modalOverlay');
+    const msgEl = document.getElementById('modalMessage');
+    msgEl.textContent = message;
+    const box = document.createElement('div');
+    box.style.cssText = 'margin:12px 0;';
+    box.innerHTML = `<div style="font-size:12.5px; margin-bottom:6px;">Ketik <strong>${escapeHtml(word)}</strong> untuk melanjutkan:</div>
+      <input type="text" id="typedConfirmInput" autocomplete="off" style="width:100%;">
+      ${opts.backup ? '<label style="display:flex; gap:6px; align-items:center; margin-top:10px; font-size:12.5px;"><input type="checkbox" id="typedConfirmBackup" checked> Unduh cadangan data dulu (disarankan)</label>' : ''}`;
+    msgEl.insertAdjacentElement('afterend', box);
+    const wrap = document.getElementById('modalButtons');
+    wrap.innerHTML = '';
+    const done = (ok)=>{
+      const bk = document.getElementById('typedConfirmBackup');
+      const backup = !!(bk && bk.checked);
+      box.remove(); overlay.classList.add('hidden');
+      resolve({ok, backup});
+    };
+    const cancel = document.createElement('button');
+    cancel.className = 'btn btn-outline'; cancel.textContent = 'Batal'; cancel.onclick = ()=>done(false);
+    const okBtn = document.createElement('button');
+    okBtn.className = 'btn btn-danger'; okBtn.textContent = 'Lanjutkan'; okBtn.disabled = true; okBtn.onclick = ()=>done(true);
+    wrap.appendChild(cancel); wrap.appendChild(okBtn);
+    box.querySelector('#typedConfirmInput').addEventListener('input', (e)=>{ okBtn.disabled = e.target.value.trim() !== word; });
+    overlay.classList.remove('hidden');
+    box.querySelector('#typedConfirmInput').focus();
+  });
+}
+
+/* ---- Backup & pemulihan ---- */
+function downloadJson(filename, obj){
+  const blob = new Blob([JSON.stringify(obj)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+}
+async function collectBackup(){
+  const keys = {};
+  for(const k of ['siswa-list','guru-list','room-quota','siswa-archive','tahfidz-guru-list','tahfidz-room-quota','tahfidz-guru-seeded']){
+    const v = await storageGet(k);
+    if(v !== null && v !== undefined) keys[k] = v;
+  }
+  for(const pre of ['penilaian:','tahfidz-penilaian:']) Object.assign(keys, await storageGetPrefixMap(pre));
+  return {app:'gens-ulba', version:1, createdAt:new Date().toISOString(), keys};
+}
+async function downloadBackup(tag){
+  const b = await collectBackup();
+  const stamp = b.createdAt.slice(0,16).replace(/[:T]/g,'-');
+  downloadJson(`gens-ulba-backup${tag ? '-'+tag : ''}-${stamp}.json`, b);
+  return b;
+}
+async function admRestoreFromFile(file){
+  let data;
+  try{ data = JSON.parse(await file.text()); }catch(e){ await showAlert('File tidak bisa dibaca. Pastikan ini file cadangan (.json) dari aplikasi ini.'); return; }
+  if(!data || data.app !== 'gens-ulba' || !data.keys || typeof data.keys !== 'object'){ await showAlert("Ini bukan file cadangan Gen's Ulba."); return; }
+  const k = data.keys;
+  const cnt = (key)=> Array.isArray(k[key]) ? k[key].length : 0;
+  if(!cnt('siswa-list')){ await showAlert('Cadangan ini tidak berisi data siswa, pemulihan dibatalkan demi keamanan.'); return; }
+  const np = Object.keys(k).filter(x=>x.startsWith('penilaian:')).length;
+  const nt = Object.keys(k).filter(x=>x.startsWith('tahfidz-penilaian:')).length;
+  const msg = `Pulihkan data dari cadangan (${data.createdAt || '-'})? Isi: ${cnt('siswa-list')} siswa, ${cnt('siswa-archive')} arsip, ${cnt('guru-list')} guru Tilawati, ${cnt('tahfidz-guru-list')} guru Tahfidz, ${np} penilaian Tilawati, ${nt} penilaian Tahfidz. SEMUA data sekarang akan DIGANTI dengan isi cadangan ini.`;
+  const r = await showTypedConfirm(msg, 'PULIHKAN', {backup:true});
+  if(!r.ok) return;
+  if(r.backup) await downloadBackup('sebelum-pulihkan');
+  setSaving(true);
+  for(const [key,val] of Object.entries(k)){
+    if(key.indexOf('admin-session') === 0) continue;
+    await storageSet(key, val);
+  }
+  for(const pre of ['penilaian:','tahfidz-penilaian:']){
+    const cur = await storageList(pre);
+    for(const key of cur){ if(!(key in k)) await storageDelete(key); }
+  }
+  setSaving(false);
+  await loadAllData();
+  await ensureRoomsBothPrograms();
+  render();
+  await showAlert('Pemulihan selesai. Admin lain yang sedang login perlu me-refresh halamannya.');
+}
+function renderAdmBackupPage(){
+  const stat = [['Siswa aktif', state.siswaList.length],['Siswa diarsipkan', (state.siswaArchive||[]).length],['Guru Tilawati', state.guruList.length],['Guru Tahfidz', state.guruListTahfidz.length],['Penilaian Tilawati', state.penilaianList.length],['Penilaian Tahfidz', state.penilaianListTahfidz.length]];
+  return `
+    <div class="card" style="padding:20px; margin-bottom:16px;">
+      <h2 class="section-title">Cadangkan Data</h2>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:14px;">
+        ${stat.map(x=>`<div class="card stat-card" style="background:var(--teal-soft); border:none;"><div class="stat-label">${x[0]}</div><div class="stat-value">${x[1]}</div></div>`).join('')}
+      </div>
+      <button class="btn btn-primary" id="admBtnBackup">&#8681; Unduh Cadangan (.json)</button>
+      <div style="font-size:12px; color:var(--ink-muted); margin-top:8px;">Berisi siswa, arsip, guru, kuota, dan seluruh riwayat penilaian kedua program. Simpan filenya di tempat aman.</div>
+    </div>
+    <div class="card" style="padding:20px;">
+      <h2 class="section-title">Pulihkan dari Cadangan</h2>
+      <div class="banner warn"><span>&#9888;</span><div>Pemulihan <strong>mengganti seluruh data</strong> dengan isi file cadangan. Aplikasi akan meminta Anda mengetik kata konfirmasi, dan menawarkan mengunduh cadangan data saat ini lebih dulu.</div></div>
+      <label class="btn btn-outline" style="cursor:pointer; margin:0;">&#8679; Pilih file cadangan
+        <input type="file" id="admRestoreFile" accept=".json,application/json" style="display:none;">
+      </label>
+    </div>`;
+}
+function bindAdmBackupEvents(){
+  document.getElementById('admBtnBackup').addEventListener('click', async ()=>{ await downloadBackup(''); await showAlert('Cadangan diunduh.'); });
+  const f = document.getElementById('admRestoreFile');
+  f.addEventListener('change', async ()=>{ const file = f.files[0]; if(file) await admRestoreFromFile(file); f.value = ''; });
+}
+
+/* ---- Data Siswa gabungan + edit massal ---- */
+const admSiswa = {q:'', kelas:'', tl:'', th:'', page:1, sel:new Set()};
+const ADM_PAGE = 50;
+function admFiltered(){
+  const q = admSiswa.q.trim().toLowerCase();
+  const byLevel = (val, cur)=> !val || (val === '__KOSONG__' ? !cur : cur === val);
+  return state.siswaList.filter(s=>
+    (!q || (s.nama||'').toLowerCase().includes(q)) &&
+    (!admSiswa.kelas || (s.kelas||'') === admSiswa.kelas) &&
+    byLevel(admSiswa.tl, s.tilawati) && byLevel(admSiswa.th, s.tahfidz));
+}
+function renderAdmSiswaPage(){
+  const kelasList = [...new Set(state.siswaList.map(s=>s.kelas||'').filter(Boolean))].sort((a,b)=>a.localeCompare(b,'id',{numeric:true}));
+  const opt = (labels, cur, nm)=> `<option value="">Semua ${nm}</option><option value="__KOSONG__" ${cur==='__KOSONG__'?'selected':''}>(belum ada)</option>` + labels.map(l=>`<option value="${escapeAttr(l)}" ${cur===l?'selected':''}>${escapeHtml(l)}</option>`).join('');
+  return `
+    <div class="card" style="padding:20px;">
+      <div class="toolbar">
+        <div class="grow"><input type="text" class="search-input" id="admQ" placeholder="Cari nama..." value="${escapeAttr(admSiswa.q)}"></div>
+        <select id="admKelas" style="width:120px;"><option value="">Semua kelas</option>${kelasList.map(k=>`<option value="${escapeAttr(k)}" ${admSiswa.kelas===k?'selected':''}>${escapeHtml(k)}</option>`).join('')}</select>
+        <select id="admTl" style="width:150px;" title="Filter Tilawati">${opt(LEVEL_LABELS, admSiswa.tl, 'Tilawati')}</select>
+        <select id="admTh" style="width:150px;" title="Filter Tahfidz">${opt(LEVEL_LABELS_TAHFIDZ, admSiswa.th, 'Tahfidz')}</select>
+      </div>
+      <div style="font-size:11.5px; color:var(--ink-muted); margin:6px 0 10px;">Filter berurutan: kelas, level Tilawati, level Tahfidz. Centang siswa lalu pakai tombol di bawah untuk mengubah sekaligus.</div>
+      <div id="admSiswaBody"></div>
+    </div>`;
+}
+function refreshAdmSiswa(){
+  const body = document.getElementById('admSiswaBody');
+  if(!body) return;
+  const list = admFiltered();
+  const pages = Math.max(1, Math.ceil(list.length / ADM_PAGE));
+  if(admSiswa.page > pages) admSiswa.page = pages;
+  const start = (admSiswa.page - 1) * ADM_PAGE;
+  const items = list.slice(start, start + ADM_PAGE);
+  const n = admSiswa.sel.size;
+  const allSel = list.length > 0 && list.every(s=>admSiswa.sel.has(s.id));
+  const lv = (labels)=> '<option value="">— pilih —</option><option value="__NONE__">(kosongkan)</option>' + labels.map(l=>`<option value="${escapeAttr(l)}">${escapeHtml(l)}</option>`).join('');
+  const rows = items.map(s=>`<tr>
+      <td><input type="checkbox" class="admChk" data-id="${escapeAttr(s.id)}" ${admSiswa.sel.has(s.id)?'checked':''}></td>
+      <td>${escapeHtml(s.nama)}</td><td>${escapeHtml(s.kelas||'-')}</td>
+      <td>${escapeHtml(s.tilawati||'-')}</td><td>${escapeHtml(s.roomOverride||s.assignedRoom||'-')}</td>
+      <td>${escapeHtml(s.tahfidz||'-')}</td><td>${escapeHtml(s.tahfidzRoomOverride||s.tahfidzAssignedRoom||'-')}</td></tr>`).join('');
+  const dis = n ? '' : 'disabled';
+  body.innerHTML = `
+    <div class="toolbar" style="margin-bottom:10px;">
+      <label style="display:flex; gap:6px; align-items:center; font-size:13px;"><input type="checkbox" id="admSelAll" ${allSel?'checked':''}> Pilih semua hasil filter (${list.length})</label>
+      <span class="pill pill-teal">${n} dipilih</span>
+    </div>
+    <div class="toolbar" style="margin-bottom:12px;">
+      <input type="text" id="admBulkKelas" placeholder="Kelas baru (mis. 4B)" style="width:150px;">
+      <button class="btn btn-outline btn-sm" id="admApplyKelas" ${dis}>Terapkan Kelas</button>
+      <select id="admBulkTl" style="width:140px;">${lv(LEVEL_LABELS)}</select>
+      <button class="btn btn-outline btn-sm" id="admApplyTl" ${dis}>Terapkan Tilawati</button>
+      <select id="admBulkTh" style="width:140px;">${lv(LEVEL_LABELS_TAHFIDZ)}</select>
+      <button class="btn btn-outline btn-sm" id="admApplyTh" ${dis}>Terapkan Tahfidz</button>
+      <button class="btn btn-danger btn-sm" id="admDelSel" ${dis}>&#128465; Hapus terpilih</button>
+    </div>
+    <div class="table-scroll"><table class="data-table">
+      <thead><tr><th style="width:36px;"></th><th>Nama</th><th>Kelas</th><th>Tilawati</th><th>Ruang</th><th>Tahfidz</th><th>Ruang</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="7"><div class="empty-state">Tidak ada siswa yang cocok.</div></td></tr>'}</tbody>
+    </table></div>
+    <div class="pagination">
+      <span>${list.length} siswa &middot; Halaman ${admSiswa.page} dari ${pages}</span>
+      <button class="btn btn-outline btn-sm" id="admPrev" ${admSiswa.page<=1?'disabled':''}>&larr; Sebelumnya</button>
+      <button class="btn btn-outline btn-sm" id="admNext" ${admSiswa.page>=pages?'disabled':''}>Berikutnya &rarr;</button>
+    </div>`;
+  document.getElementById('admSelAll').addEventListener('change', (e)=>{
+    list.forEach(s=>{ if(e.target.checked) admSiswa.sel.add(s.id); else admSiswa.sel.delete(s.id); });
+    refreshAdmSiswa();
+  });
+  body.querySelectorAll('.admChk').forEach(ch=>ch.addEventListener('change', ()=>{
+    const id = ch.getAttribute('data-id');
+    if(ch.checked) admSiswa.sel.add(id); else admSiswa.sel.delete(id);
+    refreshAdmSiswa();
+  }));
+  document.getElementById('admPrev').addEventListener('click', ()=>{ admSiswa.page--; refreshAdmSiswa(); });
+  document.getElementById('admNext').addEventListener('click', ()=>{ admSiswa.page++; refreshAdmSiswa(); });
+  document.getElementById('admApplyKelas').addEventListener('click', ()=>admBulkApply('kelas', document.getElementById('admBulkKelas').value));
+  document.getElementById('admApplyTl').addEventListener('click', ()=>admBulkApply('tilawati', document.getElementById('admBulkTl').value));
+  document.getElementById('admApplyTh').addEventListener('click', ()=>admBulkApply('tahfidz', document.getElementById('admBulkTh').value));
+  document.getElementById('admDelSel').addEventListener('click', admDeleteSelected);
+}
+async function admBulkApply(field, val){
+  const ids = new Set(admSiswa.sel);
+  if(!ids.size) return;
+  const names = {kelas:'Kelas', tilawati:'Tilawati', tahfidz:'Tahfidz'};
+  if(!val || !val.trim()){ await showAlert(field === 'kelas' ? 'Isi kelas barunya dulu.' : 'Pilih levelnya dulu.'); return; }
+  const newVal = val === '__NONE__' ? '' : val.trim();
+  const ok = await showConfirm(`Ubah ${names[field]} untuk ${ids.size} siswa menjadi "${newVal || '(kosong)'}"?`, 'Ya, Ubah');
+  if(!ok) return;
+  await safeListUpdate('siswa-list', 'siswaList', list=>{
+    list.forEach(s=>{
+      if(!ids.has(s.id)) return;
+      s[field] = newVal;
+      if(field === 'tilawati'){ s.roomOverride = ''; s.assignedRoom = ''; s.assignedLevel = ''; }
+      if(field === 'tahfidz'){ s.tahfidzRoomOverride = ''; s.tahfidzAssignedRoom = ''; s.tahfidzAssignedLevel = ''; }
+    });
+  });
+  await ensureRoomsBothPrograms();
+  render();
+}
+async function admDeleteSelected(){
+  const ids = new Set(admSiswa.sel);
+  if(!ids.size) return;
+  const r = await showTypedConfirm(`Hapus ${ids.size} siswa dari data? Siswa yang dihapus tidak masuk arsip dan hanya bisa kembali dari file cadangan.`, 'HAPUS', {backup:true});
+  if(!r.ok) return;
+  if(r.backup) await downloadBackup('sebelum-hapus');
+  await safeListUpdate('siswa-list', 'siswaList', list=>{
+    for(let i = list.length - 1; i >= 0; i--) if(ids.has(list[i].id)) list.splice(i, 1);
+  });
+  admSiswa.sel.clear();
+  render();
+}
+function bindAdmSiswaEvents(){
+  document.getElementById('admQ').addEventListener('input', (e)=>{ admSiswa.q = e.target.value; admSiswa.page = 1; refreshAdmSiswa(); });
+  [['admKelas','kelas'],['admTl','tl'],['admTh','th']].forEach(([id,key])=>{
+    document.getElementById(id).addEventListener('change', (e)=>{ admSiswa[key] = e.target.value; admSiswa.page = 1; refreshAdmSiswa(); });
+  });
+  refreshAdmSiswa();
+}
+
+/* ---- Kenaikan kelas & arsip ---- */
+let admArsipQ = '';
+function renderAdmKenaikanPage(){
+  const rows = [];
+  for(let t = 1; t <= 6; t++){
+    const c = state.siswaList.filter(s=>{ const p = parseKelas(s.kelas); return p && (t === 6 ? p.tingkat >= 6 : p.tingkat === t); }).length;
+    rows.push(`<tr><td>Kelas ${t}</td><td>${c} siswa</td><td>${t < 6 ? 'Naik ke kelas ' + (t+1) : '<strong>Diarsipkan (lulus), tidak lagi mendapat ruangan</strong>'}</td></tr>`);
+  }
+  const lain = state.siswaList.filter(s=>!parseKelas(s.kelas)).length;
+  return `
+    <div class="card" style="padding:20px; margin-bottom:16px;">
+      <h2 class="section-title">Naikkan Kelas Serentak</h2>
+      <div class="banner info"><span>&#8505;</span><div>Berlaku untuk <strong>semua siswa</strong> (data siswa dipakai bersama Tilawati dan Tahfidz). Level Tilawati dan Tahfidz tidak berubah, hanya kelasnya.${lain ? ` ${lain} siswa berformat kelas tidak dikenali, tidak diubah.` : ''}</div></div>
+      <table class="data-table" style="margin:12px 0;"><thead><tr><th>Kelas sekarang</th><th>Jumlah</th><th>Setelah dinaikkan</th></tr></thead><tbody>${rows.join('')}</tbody></table>
+      <button class="btn btn-primary" id="admBtnNaikkan">&#8593; Naikkan Kelas Serentak</button>
+    </div>
+    <div class="card" style="padding:20px;">
+      <div class="toolbar">
+        <div class="grow"><input type="text" class="search-input" id="admArsipQ" placeholder="Cari nama di arsip..." value="${escapeAttr(admArsipQ)}"></div>
+        <button class="btn btn-outline" id="admBtnCetakArsip">&#128424; Cetak Arsip</button>
+      </div>
+      <div id="admArsipBody" style="margin-top:12px;"></div>
+    </div>`;
+}
+function refreshAdmArsip(){
+  const body = document.getElementById('admArsipBody');
+  if(!body) return;
+  const q = admArsipQ.trim().toLowerCase();
+  const list = (state.siswaArchive || []).filter(s=>!q || (s.nama||'').toLowerCase().includes(q));
+  body.innerHTML = `<div style="font-size:12.5px; color:var(--ink-muted); margin-bottom:8px;">${list.length} siswa di arsip</div>
+    <div class="table-scroll" style="max-height:420px;"><table class="data-table">
+      <thead><tr><th>Nama</th><th>Kelas Terakhir</th><th>Tilawati</th><th>Tahfidz</th><th>Tgl Arsip</th><th style="width:110px;"></th></tr></thead>
+      <tbody>${list.map(s=>`<tr><td>${escapeHtml(s.nama)}</td><td>${escapeHtml(s.kelasSaatArsip||s.kelas||'')}</td><td>${escapeHtml(s.tilawati||'-')}</td><td>${escapeHtml(s.tahfidz||'-')}</td><td>${escapeHtml(s.tanggalArsip||'')}</td><td><button class="btn btn-outline btn-sm admRestore" data-id="${escapeAttr(s.id||'')}">Kembalikan</button></td></tr>`).join('') || '<tr><td colspan="6"><div class="empty-state">Arsip kosong.</div></td></tr>'}</tbody>
+    </table></div>`;
+  body.querySelectorAll('.admRestore').forEach(b=>b.addEventListener('click', ()=>admRestoreArsip(b.getAttribute('data-id'))));
+}
+async function admRestoreArsip(id){
+  const rec = (state.siswaArchive || []).find(s=>s.id === id);
+  if(!rec) return;
+  const kelas = rec.kelasSaatArsip || rec.kelas || '';
+  const ok = await showConfirm(`Kembalikan ${rec.nama} ke daftar siswa aktif (kelas ${kelas})?`, 'Ya, Kembalikan');
+  if(!ok) return;
+  const {kelasSaatArsip, tanggalArsip, ...clean} = rec;
+  await safeListUpdate('siswa-list', 'siswaList', list=>{ if(!list.some(x=>x.id === id)) list.push({...clean, kelas}); });
+  const rest = await storageTransact('siswa-archive', cur=>(cur || []).filter(x=>x.id !== id));
+  state.siswaArchive = rest || [];
+  await ensureRoomsBothPrograms();
+  render();
+}
+async function admNaikkan(){
+  const r = await showTypedConfirm(`Naikkan kelas ${state.siswaList.length} siswa sekarang? Berlaku untuk SEMUA siswa (Tilawati dan Tahfidz). Siswa kelas 6 diarsipkan dan tidak lagi mendapat ruangan.`, 'NAIKKAN', {backup:true});
+  if(!r.ok) return;
+  if(r.backup) await downloadBackup('sebelum-naik-kelas');
+  await processKenaikanKelasSerentak(true);
+}
+function bindAdmKenaikanEvents(){
+  document.getElementById('admBtnNaikkan').addEventListener('click', admNaikkan);
+  document.getElementById('admBtnCetakArsip').addEventListener('click', ()=>doPrint('arsip'));
+  document.getElementById('admArsipQ').addEventListener('input', (e)=>{ admArsipQ = e.target.value; refreshAdmArsip(); });
+  refreshAdmArsip();
 }
 
 /* ======================= MENU TOGGLE (mobile) ======================= */
@@ -3890,15 +4248,22 @@ window.addEventListener('beforeunload', ()=>{
 function proceedLogin(role, pengujiName, authMode){
   state.pengujiName = pengujiName || '';
   const errBox = document.getElementById('loginError');
+  // Mode Administrator hanya untuk akun role 'admin'. Penguji ditolak.
+  if(state.loginMode === 'administrator' && role !== 'admin'){
+    errBox.textContent = 'Akun ini tidak punya akses Administrator. Pilih Tilawati atau Tahfidz.';
+    if(firebaseAuth && firebaseAuth.currentUser) firebaseAuth.signOut();
+    return;
+  }
 
   const finish = ()=>{
     state.role = role;
-    document.getElementById('whoAmI').textContent = role === 'admin' ? 'Masuk sebagai Admin' : ('Penguji: ' + state.pengujiName);
+    state.adminMode = (role === 'admin' && state.loginMode === 'administrator');
+    document.getElementById('whoAmI').textContent = role === 'admin' ? 'Masuk sebagai Administrator' : ('Penguji: ' + state.pengujiName);
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
     state.view = role === 'admin' ? 'dashboard' : 'uji';
     try{
-      sessionStorage.setItem('gens-ulba-auth', JSON.stringify({role: role, pengujiName: state.pengujiName, view: state.view, authMode: authMode || 'legacy'}));
+      sessionStorage.setItem('gens-ulba-auth', JSON.stringify({role: role, pengujiName: state.pengujiName, view: state.view, adminMode: state.adminMode, authMode: authMode || 'legacy'}));
     }catch(e){ /* abaikan kalau sessionStorage tidak tersedia */ }
     recordLoginSuccess();
     startApp();
@@ -4009,6 +4374,7 @@ function handleLogout(){
     releaseAdminSession();
   }
   state.role = null;
+  state.adminMode = false;
   state.pengujiName = '';
   try{ sessionStorage.removeItem('gens-ulba-auth'); }catch(e){ /* abaikan */ }
   if(firebaseAuth && firebaseAuth.currentUser) firebaseAuth.signOut().catch(()=>{});
@@ -4028,10 +4394,18 @@ document.getElementById('loginUsername').addEventListener('input', (e)=>{
 
 /* ======================= PILIH PROGRAM (sebelum login) ======================= */
 function selectProgram(program){
-  if(program !== 'tilawati' && program !== 'tahfidz') return;
-  state.program = program;
+  if(program !== 'tilawati' && program !== 'tahfidz' && program !== 'administrator') return;
+  state.loginMode = program;
+  if(program === 'administrator'){
+    // Di mode Administrator, "program kerja" awal = tab terakhir yang dipakai (default Tilawati).
+    let tab = null;
+    try{ tab = sessionStorage.getItem('gens-ulba-program-tab'); }catch(e){ /* abaikan */ }
+    state.program = (tab === 'tahfidz') ? 'tahfidz' : 'tilawati';
+  }else{
+    state.program = program;
+  }
   try{ sessionStorage.setItem('gens-ulba-program', program); }catch(e){ /* abaikan */ }
-  document.getElementById('loginProgramLabel').textContent = program === 'tahfidz' ? 'Tahfidz' : 'Tilawati';
+  document.getElementById('loginProgramLabel').textContent = program === 'administrator' ? 'Semua Program' : (program === 'tahfidz' ? 'Tahfidz' : 'Tilawati');
   document.querySelectorAll('#programSwitch [data-program]').forEach(btn=>{
     btn.classList.toggle('active', btn.getAttribute('data-program') === program);
   });
@@ -4039,12 +4413,11 @@ function selectProgram(program){
 document.querySelectorAll('#programSwitch [data-program]').forEach(btn=>{
   btn.addEventListener('click', ()=> selectProgram(btn.getAttribute('data-program')));
 });
-// Program yang terakhir dipilih di tab/sesi ini dipakai lagi setelah refresh;
-// kalau belum pernah memilih, default ke Tilawati.
+// Pilihan terakhir di tab/sesi ini dipakai lagi setelah refresh; default Tilawati.
 (function initProgram(){
   let saved = null;
   try{ saved = sessionStorage.getItem('gens-ulba-program'); }catch(e){ /* abaikan */ }
-  selectProgram(saved === 'tahfidz' ? 'tahfidz' : 'tilawati');
+  selectProgram(saved === 'tahfidz' || saved === 'administrator' ? saved : 'tilawati');
 })();
 
 // Kalau session sebelumnya login lewat Firebase Auth, tunggu dulu SDK-nya
@@ -4075,8 +4448,10 @@ async function restoreSession(){
     if(!saved || !saved.role) return false;
     if(saved.authMode === 'firebase') await waitForFirebaseAuthReady();
     state.role = saved.role;
+    state.adminMode = !!saved.adminMode && saved.role === 'admin';
+    if(state.adminMode) state.loginMode = 'administrator';
     state.pengujiName = saved.pengujiName || '';
-    document.getElementById('whoAmI').textContent = saved.role === 'admin' ? 'Masuk sebagai Admin' : ('Penguji: ' + state.pengujiName);
+    document.getElementById('whoAmI').textContent = saved.role === 'admin' ? 'Masuk sebagai Administrator' : ('Penguji: ' + state.pengujiName);
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
     // Pakai halaman terakhir yang tersimpan (bukan selalu balik ke Dashboard),
