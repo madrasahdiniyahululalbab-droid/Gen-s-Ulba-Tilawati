@@ -1454,7 +1454,7 @@ function setPage(){
   const meta = PAGE_META[state.view];
   const suffix = isTahfidz() ? ' — Tahfidz' : '';
   document.getElementById('pageTitle').textContent = meta.title + suffix;
-  document.getElementById('pageSub').textContent = meta.sub;
+  document.getElementById('pageSub').textContent = meta.sub.replace(/Tilawati/g, programLabel());
 }
 
 // Update avatar/nama di navbar atas + isi dropdown notifikasi (riwayat terbaru).
@@ -3135,21 +3135,23 @@ async function doExcelExport(){
 /* ======================= DASHBOARD ======================= */
 function renderDashboard(){
   const totalSiswa = state.siswaList.length;
-  const totalGuru = state.guruList.length;
+  const totalGuru = activeGuruList().length;
   const totalRuangan = allDistinctRooms().length;
-  const belumTilawati = state.siswaList.filter(s=>!s.tilawati).length;
+  const levelField = siswaLevelField();
+  const progLabel = programLabel();
+  const belumTilawati = state.siswaList.filter(s=>!s[levelField]).length;
   const belumKelas = state.siswaList.filter(s=>!s.kelas || !s.kelas.trim()).length;
 
   let overCapacityWarnings = [];
-  LEVELS.forEach(l=>{
+  activeLevels().forEach(l=>{
     const {leftover} = assignRooms(l.label);
     if(leftover.length > 0){
       overCapacityWarnings.push(`${l.label}: ${leftover.length} siswa belum tertampung ruangan`);
     }
   });
 
-  const levelRows = LEVELS.map(l=>{
-    const count = state.siswaList.filter(s=>s.tilawati===l.label).length;
+  const levelRows = activeLevels().map(l=>{
+    const count = state.siswaList.filter(s=>s[levelField]===l.label).length;
     const roomCount = getRoomsForLevel(l.kode).length;
     return `<tr>
       <td>${l.label}</td>
@@ -3162,8 +3164,9 @@ function renderDashboard(){
   const now = Date.now();
   const weekAgo = now - 7*24*60*60*1000;
   const twoWeeksAgo = now - 14*24*60*60*1000;
-  const weeklyTests = state.penilaianList.filter(r => r.ts >= weekAgo);
-  const prevWeekTests = state.penilaianList.filter(r => r.ts >= twoWeeksAgo && r.ts < weekAgo);
+  const penilaianAktif = activePenilaianList();
+  const weeklyTests = penilaianAktif.filter(r => r.ts >= weekAgo);
+  const prevWeekTests = penilaianAktif.filter(r => r.ts >= twoWeeksAgo && r.ts < weekAgo);
   const wkNaik = weeklyTests.filter(r=>r.hasil.startsWith('Naik')).length;
   const wkBelum = weeklyTests.filter(r=>r.hasil==='Belum Naik').length;
   const wkPending = weeklyTests.filter(r=>r.hasil==='Pending').length;
@@ -3204,7 +3207,7 @@ function renderDashboard(){
       </div>
       <div class="card stat-card">
         <div class="stat-icon-chip" style="background:${belumTilawati>0?'#FFF3D6':'#E1F6D9'}; color:${belumTilawati>0?'#D9950A':'#5BAE3A'};">&#128214;</div>
-        <div class="stat-label">Belum Ada Tilawati</div>
+        <div class="stat-label">Belum Ada ${progLabel}</div>
         <div class="stat-value" style="color:${belumTilawati>0?'#D5544A':'#2E9E5B'}">${belumTilawati}</div>
         <div class="stat-sub">perlu diisi levelnya</div>
       </div>
@@ -3222,7 +3225,7 @@ function renderDashboard(){
     `}
 
     <div class="card" style="padding:20px; margin-top:16px;">
-      <h2 class="section-title">Laporan Minggu Ini</h2>
+      <h2 class="section-title">Laporan Minggu Ini &mdash; ${progLabel}</h2>
       <div class="grid-4" style="margin-bottom:14px;">
         <div class="card stat-card" style="background:var(--teal-soft); border:none;">
           <div class="stat-label">Total Dites</div>
@@ -3655,7 +3658,7 @@ function bindCetakEvents(){
 /* ======================= KENAIKAN KELAS SERENTAK ======================= */
 async function processKenaikanKelasSerentak(){
   const confirm1 = await showConfirm(
-    `Naikkan kelas ${state.siswaList.length} siswa sekaligus? Kelas 6 akan diarsipkan.`,
+    `Naikkan kelas ${state.siswaList.length} siswa sekaligus? Data siswa dipakai bersama Tilawati dan Tahfidz, jadi kelas SEMUA siswa (termasuk siswa Tahfidz) ikut naik. Kelas 6 akan diarsipkan.`,
     'Ya, Lanjutkan'
   );
   if(!confirm1) return;
