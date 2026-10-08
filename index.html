@@ -314,6 +314,12 @@
   .room-card-head .room-name{font-family:var(--font-display); font-weight:600; font-size:15px; color:var(--teal-dark);}
   .room-card-head .room-guru{font-size:12px; color:var(--ink-muted); margin-top:2px;}
   .room-card-body{padding:0;}
+  .room-card.drag-over{border-color:var(--teal); box-shadow:0 0 0 3px rgba(74,144,217,0.25);}
+  .room-card.drag-over .room-card-head{background:var(--teal-soft);}
+  tr.siswa-drag{cursor:grab;}
+  tr.siswa-drag:active{cursor:grabbing;}
+  tr.siswa-drag.dragging{opacity:0.4;}
+  .pindah-sel{padding:4px 6px; font-size:12px; border:1px solid var(--border); border-radius:6px; background:#fff; max-width:92px;}
   .capacity-bar{width:120px; height:6px; border-radius:99px; background:#E4DFD2; overflow:hidden;}
   .capacity-fill{height:100%; background:var(--teal);}
   .capacity-fill.over{background:var(--rose);}
@@ -1273,7 +1279,15 @@ function ensureRoomAssignments(){
 
     studentsInLevel.forEach(s=>{
       if(s[overrideField]){
-        return; // pindahan manual - dihormati apa adanya, tidak disentuh di sini
+        // pindahan manual - dihormati apa adanya, tidak dipindah lagi di sini.
+        // Tapi tetap DIHITUNG di ruang tujuannya, supaya kuota ruang itu
+        // akurat saat siswa baru/belum berruang dibagikan.
+        const ob = roomBuckets.find(b=>b.room === s[overrideField]);
+        if(ob){
+          ob.count++;
+          ob.kelasCounts[s.kelas] = (ob.kelasCounts[s.kelas]||0) + 1;
+        }
+        return;
       }
       if(s[roomField] && s[levelAssignedField] === level.label && rooms.includes(s[roomField])){
         const bucket = roomBuckets.find(b=>b.room === s[roomField]);
@@ -1852,11 +1866,16 @@ function renderPembagianPage(){
   const roomCards = rooms.map((r,i)=>{
     const pct = Math.min(100, Math.round((r.students.length / r.quota) * 100));
     const over = r.students.length >= r.quota;
+    const canMove = state.role === 'admin';
+    const otherRooms = rooms.filter(x=>x.room !== r.room);
     const studentRows = r.students.map((s,idx)=>`
-      <tr><td style="width:44px;">${idx+1}</td><td>${escapeHtml(s.nama)}</td><td style="width:90px;">${escapeHtml(s.kelas||'')}</td></tr>
+      <tr ${canMove ? `class="siswa-drag" draggable="true" data-sid="${escapeAttr(s.id)}"` : ''}>
+        <td style="width:44px;">${idx+1}</td><td>${escapeHtml(s.nama)}</td><td style="width:90px;">${escapeHtml(s.kelas||'')}</td>
+        ${canMove ? `<td style="width:110px;"><select class="pindah-sel" data-sid="${escapeAttr(s.id)}"><option value="">Pindah...</option>${otherRooms.map(o=>`<option value="${escapeAttr(o.room)}">${escapeHtml(o.room)}</option>`).join('')}</select></td>` : ''}
+      </tr>
     `).join('');
     return `
-      <div class="room-card">
+      <div class="room-card" data-room="${escapeAttr(r.room)}">
         <div class="room-card-head">
           <div>
             <div class="room-name">Ruang ${r.room}</div>
@@ -1871,7 +1890,7 @@ function renderPembagianPage(){
           ${r.students.length ? `
           <div class="table-scroll" style="max-height:260px; border:none; border-radius:0;">
             <table class="data-table">
-              <thead><tr><th>No</th><th>Nama</th><th>Kelas</th></tr></thead>
+              <thead><tr><th>No</th><th>Nama</th><th>Kelas</th>${canMove ? '<th>Pindah</th>' : ''}</tr></thead>
               <tbody>${studentRows}</tbody>
             </table>
           </div>` : `<div class="empty-state" style="padding:22px;">Belum ada siswa di ruangan ini.</div>`}
@@ -1891,8 +1910,13 @@ function renderPembagianPage(){
     </div>
   ` : '';
 
+  const dragHint = (state.role === 'admin' && rooms.length > 1) ? `
+    <div class="banner info"><span>&#8596;</span><div>Untuk memindahkan siswa: <strong>seret nama siswa</strong> ke kotak ruangan lain, atau pilih ruangan di kolom <strong>Pindah</strong> (cocok untuk HP).</div></div>
+  ` : '';
+
   return `
     <div class="level-tabs">${tabs}</div>
+    ${dragHint}
     ${!rooms.length ? `<div class="banner warn"><span>&#9888;</span><div>Belum ada ruangan/guru dengan kode <strong>${activeLevels().find(l=>l.label===curLevel).kode}</strong>. Tambahkan guru untuk tingkatan ini di halaman Data Guru.</div></div>` : ''}
     ${leftoverBlock}
     ${roomCards}
@@ -3564,11 +3588,66 @@ function bindGuruRowEvents(){
   });
 }
 
+// Pindahkan siswa ke ruangan lain (hanya Admin). Memakai mekanisme "pindahan
+// manual" yang sama dengan dropdown Ruang di Data Siswa, jadi berlaku untuk
+// Tilawati DAN Tahfidz (field-nya otomatis ikut program aktif), dan hasilnya
+// ikut terbaca di Cetak Laporan. Kalau dipindah balik ke ruang aslinya,
+// penanda pindahan dihapus.
+async function moveSiswaToRoom(siswaId, room){
+  if(state.role !== 'admin' || !room) return;
+  const s = findSiswa(siswaId);
+  if(!s) return;
+  const overrideField = siswaRoomOverrideField();
+  const roomField = siswaRoomField();
+  const current = s[overrideField] || s[roomField];
+  if(current === room) return;
+  const {rooms} = assignRooms(activePembagianLevel());
+  const target = rooms.find(r=>r.room === room);
+  if(target && target.students.length >= target.quota){
+    const ok = await showConfirm(`Ruang ${room} sudah penuh (${target.students.length} / ${target.quota}). Tetap pindahkan ${s.nama}?`, 'Ya, Pindahkan');
+    if(!ok){ render(); return; }
+  }
+  await updateSiswaSafely(siswaId, x=>{
+    x[overrideField] = (room === x[roomField]) ? '' : room;
+  });
+  render();
+}
+
 function bindPembagianEvents(){
   document.querySelectorAll('[data-level]').forEach(el=>{
     el.addEventListener('click', ()=>{
       setActivePembagianLevel(el.getAttribute('data-level'));
       render();
+    });
+  });
+  if(state.role !== 'admin') return;
+
+  let dragId = null;
+  document.querySelectorAll('tr.siswa-drag').forEach(tr=>{
+    tr.addEventListener('dragstart', (e)=>{
+      dragId = tr.getAttribute('data-sid');
+      tr.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      try{ e.dataTransfer.setData('text/plain', dragId); }catch(err){ /* abaikan */ }
+    });
+    tr.addEventListener('dragend', ()=>{
+      tr.classList.remove('dragging');
+      document.querySelectorAll('.room-card.drag-over').forEach(c=>c.classList.remove('drag-over'));
+    });
+  });
+  document.querySelectorAll('.room-card[data-room]').forEach(card=>{
+    card.addEventListener('dragover', (e)=>{ if(dragId){ e.preventDefault(); card.classList.add('drag-over'); } });
+    card.addEventListener('dragleave', (e)=>{ if(!card.contains(e.relatedTarget)) card.classList.remove('drag-over'); });
+    card.addEventListener('drop', (e)=>{
+      e.preventDefault();
+      card.classList.remove('drag-over');
+      const id = dragId; dragId = null;
+      if(id) moveSiswaToRoom(id, card.getAttribute('data-room'));
+    });
+  });
+  document.querySelectorAll('.pindah-sel').forEach(sel=>{
+    sel.addEventListener('change', ()=>{
+      if(sel.value) moveSiswaToRoom(sel.getAttribute('data-sid'), sel.value);
     });
   });
 }
