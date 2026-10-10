@@ -114,6 +114,12 @@
   .nav-item:hover{background:rgba(255,255,255,0.08); color:#fff;}
   .nav-item.active{background:var(--teal); color:#fff;}
   .nav-icon{width:17px; text-align:center; font-size:14px;}
+  /* Sub-daftar pilihan program di bawah menu aktif (sidebar) */
+  .nav-sub{margin:0 0 8px 28px; padding-left:10px; border-left:2px solid rgba(255,255,255,0.2); display:flex; flex-direction:column; gap:2px; animation:navSubIn .18s ease both;}
+  .nav-sub-item{padding:7px 10px; border-radius:7px; font-size:12.5px; font-weight:500; color:rgba(255,255,255,0.68); cursor:pointer; user-select:none; transition:background .15s, color .15s;}
+  .nav-sub-item:hover{background:rgba(255,255,255,0.08); color:#fff;}
+  .nav-sub-item.active{background:rgba(255,255,255,0.18); color:#fff; font-weight:700;}
+  @keyframes navSubIn{from{opacity:0; transform:translateY(-4px);} to{opacity:1; transform:none;}}
   .sidebar-foot{
     padding:14px 20px 18px;
     font-size:11px;
@@ -131,11 +137,21 @@
   }
   #topbar h1{
     font-family:var(--font-display);
-    font-size:22px;
-    font-weight:600;
+    font-size:24px;
+    font-weight:800;
+    letter-spacing:-0.01em;
+    line-height:1.15;
     margin:0;
+    color:var(--ink);
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
   }
-  #topbar p{margin:2px 0 0; color:var(--ink-muted); font-size:12.5px;}
+  #topbar p{margin:5px 0 0; color:var(--ink-muted); font-size:13px; font-weight:500;}
+  /* Penanda program (Tilawati / Tahfidz) - dipakai seragam di judul halaman & judul bagian */
+  .prog-badge{
+    display:inline-block; font-family:var(--font-body); font-size:11px; font-weight:700;
+    letter-spacing:.08em; text-transform:uppercase; padding:4px 11px; border-radius:99px;
+    background:var(--teal-soft); color:var(--teal-dark); border:1px solid #CFE3F7; line-height:1.3;
+  }
   #content{padding:26px 32px 60px; flex:1;}
 
   /* ---------- Animasi transisi buka halaman/kartu ---------- */
@@ -223,16 +239,20 @@
     width:40px; height:40px; border-radius:12px; display:flex; align-items:center; justify-content:center;
     font-size:18px; flex-shrink:0;
   }
-  .stat-label{font-size:11.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-muted); font-weight:600;}
-  .stat-value{font-family:var(--font-display); font-size:30px; font-weight:600; margin-top:6px; color:var(--ink);}
+  .stat-label{font-size:11.5px; text-transform:uppercase; letter-spacing:.07em; color:var(--ink-muted); font-weight:700;}
+  .stat-value{font-family:var(--font-display); font-size:30px; font-weight:700; margin-top:6px; color:var(--ink); line-height:1.1;}
   .stat-sub{font-size:12px; color:var(--ink-muted); margin-top:4px;}
 
   h2.section-title{
     font-family:var(--font-display);
-    font-size:18px;
-    font-weight:600;
+    font-size:17px;
+    font-weight:700;
     margin:0 0 14px;
-    color:var(--teal-dark);
+    color:var(--ink);
+    padding-left:12px;
+    border-left:4px solid var(--teal);
+    line-height:1.2;
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
   }
   .banner{
     border-radius:var(--radius);
@@ -324,12 +344,14 @@
   .capacity-fill{height:100%; background:var(--teal);}
   .capacity-fill.over{background:var(--rose);}
 
-  .level-tabs{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:18px;}
+  .level-tabs{display:flex; gap:4px; flex-wrap:wrap; margin-bottom:18px; padding:5px; background:#fff; border:1px solid var(--border); border-radius:14px; box-shadow:0 1px 3px rgba(20,40,80,0.06);}
   .level-tab{
-    padding:8px 14px; border-radius:99px; font-size:12.5px; font-weight:600; cursor:pointer;
-    border:1px solid var(--border); background:#fff; color:var(--ink-muted); user-select:none;
+    padding:8px 16px; border-radius:10px; font-size:12.5px; font-weight:600; cursor:pointer;
+    border:1px solid transparent; background:transparent; color:var(--ink-muted); user-select:none;
+    transition:background .15s, color .15s, box-shadow .15s;
   }
-  .level-tab.active{background:var(--teal); border-color:var(--teal); color:#fff;}
+  .level-tab:hover{background:rgba(0,0,0,0.045); color:var(--ink);}
+  .level-tab.active{background:var(--teal); border-color:var(--teal); color:#fff; box-shadow:0 2px 6px rgba(20,40,80,0.2);}
 
   .cetak-mode-tabs{display:flex; gap:8px; margin-bottom:16px;}
   .cetak-mode-tab{
@@ -525,7 +547,7 @@
       <div style="display:flex; align-items:center; gap:12px;">
         <button id="menuToggle" class="btn btn-outline btn-sm" style="display:none;">☰</button>
         <div>
-          <h1 id="pageTitle">Dashboard</h1>
+          <h1 id="pageTitle">Ringkasan</h1>
           <p id="pageSub">Ringkasan sistem pembagian Tilawati</p>
         </div>
       </div>
@@ -670,7 +692,7 @@ const MATERI_TAHFIDZ = {
 };
 
 const NAV_ITEMS = [
-  {id:'dashboard', label:'Dashboard', icon:'&#9673;', roles:['admin','penguji']},
+  {id:'dashboard', label:'Ringkasan', icon:'&#9673;', roles:['admin','penguji']},
   {id:'siswa', label:'Data Siswa', icon:'&#9782;', roles:['admin','penguji']},
   {id:'guru', label:'Data Guru', icon:'&#9737;', roles:['admin','penguji']},
   {id:'pembagian', label:'Pembagian Ruangan', icon:'&#9638;', roles:['admin','penguji']},
@@ -1455,7 +1477,7 @@ function nextKelasLabel(kelas){
 
 /* ======================= NAV / ROUTER ======================= */
 const PAGE_META = {
-  dashboard:{title:'Dashboard', sub:'Ringkasan sistem pembagian Tilawati'},
+  dashboard:{title:'Ringkasan', sub:'Gambaran singkat siswa, guru, ruangan, dan hasil uji Tilawati'},
   siswa:{title:'Data Siswa', sub:'Kelola data induk siswa & tingkatan Tilawati-nya'},
   guru:{title:'Data Guru', sub:'Kelola data guru, kode, dan ruangan mengajar'},
   pembagian:{title:'Pembagian Ruangan', sub:'Hasil pembagian otomatis per tingkatan & ruangan'},
@@ -1470,14 +1492,41 @@ const PAGE_META = {
 
 let lastAnimatedView = null;
 
+// Daftar pilihan kecil (sub-menu) yang muncul di bawah menu aktif di sidebar.
+// Mode Administrator saja. Menu per-program: pilihan Program Tilawati/Tahfidz.
+// Menu Cetak Laporan: Ruangan Tilawati, Ruangan Tahfidz, Kelas (Gabungan).
+function getNavSubItems(viewId){
+  if(!state.adminMode) return null;
+  if(viewId === 'cetak'){
+    const kelas = state.cetakMode === 'kelas';
+    return [
+      {key:'cetak:ruangan:tilawati', label:'Ruangan Tilawati', active: !kelas && state.program==='tilawati'},
+      {key:'cetak:ruangan:tahfidz',  label:'Ruangan Tahfidz',  active: !kelas && state.program==='tahfidz'},
+      {key:'cetak:kelas',            label:'Kelas (Gabungan)', active: kelas},
+    ];
+  }
+  if(ADMIN_PROGRAM_VIEWS.includes(viewId)){
+    return [
+      {key:'prog:tilawati', label:'Program Tilawati', active: state.program==='tilawati'},
+      {key:'prog:tahfidz',  label:'Program Tahfidz',  active: state.program==='tahfidz'},
+    ];
+  }
+  return null;
+}
+
 function renderNav(){
   const nav = document.getElementById('navList');
+  const navScroll = nav.scrollTop;
   const items = state.adminMode ? ADMIN_NAV_ITEMS : NAV_ITEMS.filter(item=>item.roles.includes(state.role));
-  nav.innerHTML = items.map(item=>`
+  nav.innerHTML = items.map(item=>{
+    const subs = (state.view===item.id) ? getNavSubItems(item.id) : null;
+    return `
     <div class="nav-item ${state.view===item.id?'active':''}" data-nav="${item.id}">
       <span class="nav-icon">${item.icon}</span><span>${item.label}</span>
     </div>
-  `).join('');
+    ${subs ? `<div class="nav-sub">${subs.map(sub=>`<div class="nav-sub-item ${sub.active?'active':''}" data-navsub="${sub.key}">${sub.label}</div>`).join('')}</div>` : ''}
+  `;}).join('');
+  nav.scrollTop = navScroll;
   nav.querySelectorAll('[data-nav]').forEach(el=>{
     el.addEventListener('click', ()=>{
       state.view = el.getAttribute('data-nav');
@@ -1486,14 +1535,28 @@ function renderNav(){
       render();
     });
   });
+  nav.querySelectorAll('[data-navsub]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      document.getElementById('sidebar').classList.remove('open');
+      applyNavSub(el.getAttribute('data-navsub'));
+    });
+  });
 }
 
 function setPage(){
   const meta = PAGE_META[state.view];
   const isAdm = state.view.startsWith('adm-');
-  const suffix = (isTahfidz() && !isAdm) ? ' — Tahfidz' : '';
-  document.getElementById('pageTitle').textContent = meta.title + suffix;
-  document.getElementById('pageSub').textContent = isAdm ? meta.sub : meta.sub.replace(/Tilawati/g, programLabel());
+  const gabungan = (state.view === 'cetak' && state.cetakMode === 'kelas');
+  // Judul halaman selalu sama dengan nama menu di sidebar, dengan penanda
+  // program (Tilawati/Tahfidz) berbentuk label di sebelahnya - seragam di semua halaman.
+  const navList = state.adminMode ? ADMIN_NAV_ITEMS : NAV_ITEMS;
+  const navItem = navList.find(i=>i.id===state.view);
+  const baseTitle = (navItem && navItem.label) || meta.title;
+  const badge = (!isAdm && !gabungan) ? `<span class="prog-badge">${escapeHtml(programLabel())}</span>` : '';
+  document.getElementById('pageTitle').innerHTML = escapeHtml(baseTitle) + badge;
+  document.getElementById('pageSub').textContent = gabungan
+    ? 'Cetak daftar siswa per kelas (Tilawati & Tahfidz dalam satu daftar)'
+    : (isAdm ? meta.sub : meta.sub.replace(/Tilawati/g, programLabel()));
 }
 
 // Update avatar/nama di navbar atas + isi dropdown notifikasi (riwayat terbaru).
@@ -1529,6 +1592,11 @@ function updateTopbarWidgets(){
 }
 
 function render(){
+  // Simpan posisi scroll (halaman + tabel yang bisa di-scroll sendiri) supaya
+  // setelah render ulang tampilan TIDAK loncat kembali ke atas / baris pertama.
+  const viewBefore = lastAnimatedView;
+  const pageScrollY = window.scrollY;
+  const tableScrolls = Array.from(document.querySelectorAll('#content .table-scroll')).map(el=>el.scrollTop);
   const navList = state.adminMode ? ADMIN_NAV_ITEMS : NAV_ITEMS;
   const navItem = navList.find(i=>i.id===state.view);
   if(!navItem || (!state.adminMode && !navItem.roles.includes(state.role))){
@@ -1569,7 +1637,13 @@ function render(){
   }else{
     bindViewEvents();
   }
-  if(state.adminMode) addProgramTabs(c);
+  // Kembalikan posisi scroll kalau masih di halaman yang sama.
+  if(viewBefore === state.view){
+    c.querySelectorAll('.table-scroll').forEach((el,i)=>{ if(tableScrolls[i]) el.scrollTop = tableScrolls[i]; });
+    window.scrollTo(0, pageScrollY);
+  }else{
+    window.scrollTo(0, 0);
+  }
 }
 
 // Ganti field EDIT per-baris (di dalam tbody) jadi teks biasa - ini yang
@@ -1793,6 +1867,24 @@ function refreshSiswaTable(){
     document.getElementById('siswaPrev').addEventListener('click', ()=>{ state.siswaPage--; isReadOnly() ? refreshSiswaTableReadOnly() : refreshSiswaTable(); });
     document.getElementById('siswaNext').addEventListener('click', ()=>{ state.siswaPage++; isReadOnly() ? refreshSiswaTableReadOnly() : refreshSiswaTable(); });
   }
+}
+
+// Perbarui SATU baris siswa saja (setelah tingkatan diubah) tanpa menggambar
+// ulang seluruh halaman, jadi posisi scroll & fokus tetap nyaman.
+function refreshSiswaRow(id){
+  const tbody = document.getElementById('siswaTbody');
+  const s = findSiswa(id);
+  const tr = tbody ? Array.from(tbody.querySelectorAll('tr[data-id]')).find(r=>r.getAttribute('data-id')===id) : null;
+  if(!tr || !s){ refreshSiswaTable(); return; }
+  const num = parseInt(tr.firstElementChild.textContent, 10) || 1;
+  const holder = document.createElement('tbody');
+  holder.innerHTML = buildSiswaTableHtml([s], allDistinctRooms(), num - 1);
+  const fresh = holder.firstElementChild;
+  if(!fresh){ refreshSiswaTable(); return; }
+  tr.replaceWith(fresh);
+  bindSiswaRowEvents([fresh]);
+  const sel = fresh.querySelector('.siswa-tilawati');
+  if(sel){ try{ sel.focus({preventScroll:true}); }catch(e){ /* abaikan */ } }
 }
 
 function escapeAttr(str){
@@ -2617,14 +2709,11 @@ function renderCetakPage(){
   // Kelas" dan "Arsip" belum dibuat untuk Tahfidz (Arsip perlu fitur Naikkan
   // Serentak yang juga belum ada untuk Tahfidz) - supaya tidak menjalankan
   // logika Tilawati yang salah data.
-  const modeTabs = tahfidzMode ? '' : `
-    <div class="cetak-mode-tabs">
-      <div class="cetak-mode-tab ${state.cetakMode==='ruangan'?'active':''}" data-cetakmode="ruangan">Cetak Ruangan</div>
-      <div class="cetak-mode-tab ${state.cetakMode==='kelas'?'active':''}" data-cetakmode="kelas">Cetak Kelas</div>
-    </div>
-  `;
+  // Pilihan Ruangan Tilawati / Ruangan Tahfidz / Kelas (Gabungan) sekarang ada
+  // di sub-daftar sidebar, jadi tab mode di halaman ini dihilangkan.
+  const modeTabs = '';
 
-  if(!tahfidzMode && state.cetakMode === 'kelas'){
+  if(state.cetakMode === 'kelas'){
     return modeTabs + renderCetakKelasTab();
   }
 
@@ -2706,8 +2795,8 @@ function renderCetakKelasTab(){
               <div style="font-weight:700; margin-bottom:6px; color:var(--teal-dark);">Kelas ${escapeHtml(g.kelas)} &mdash; ${g.students.length} siswa</div>
               <div class="table-scroll" style="max-height:220px;">
                 <table class="data-table">
-                  <thead><tr><th style="width:44px;">No</th><th>Nama</th><th style="width:110px;">Tilawati</th></tr></thead>
-                  <tbody>${g.students.map((s,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(s.nama)}</td><td>${escapeHtml(s.tilawati||'-')}</td></tr>`).join('')}</tbody>
+                  <thead><tr><th style="width:44px;">No</th><th>Nama</th><th style="width:130px;">Tilawati</th><th style="width:130px;">Tahfidz</th></tr></thead>
+                  <tbody>${g.students.map((s,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(s.nama)}</td><td>${escapeHtml(s.tilawati||'-')}</td><td>${escapeHtml(s.tahfidz||'-')}</td></tr>`).join('')}</tbody>
                 </table>
               </div>
             </div>
@@ -2923,7 +3012,7 @@ function buildKelasPrintDocument(kelasFilter){
   const groups = getKelasGroups().filter(g => kelasFilter === '__ALL__' || g.kelas === kelasFilter);
   const pages = groups.map(g=>{
     const rowsHtml = g.students.map((s,i)=>`
-      <tr><td class="c-no">${i+1}</td><td class="c-nama">${escapeHtml(s.nama)}</td><td class="c-kelas">${escapeHtml(s.tilawati||'-')}</td></tr>
+      <tr><td class="c-no">${i+1}</td><td class="c-nama">${escapeHtml(s.nama)}</td><td class="c-kelas">${escapeHtml(s.tilawati||'-')}</td><td class="c-kelas">${escapeHtml(s.tahfidz||'-')}</td></tr>
     `).join('');
     return `
     <section class="print-page">
@@ -2934,7 +3023,7 @@ function buildKelasPrintDocument(kelasFilter){
       </div>
       <div class="edaran-tanggal">${escapeHtml(tanggal)}</div>
       <table class="print-table">
-        <thead><tr><th class="c-no">NO</th><th class="c-nama">NAMA LENGKAP</th><th class="c-kelas">TILAWATI</th></tr></thead>
+        <thead><tr><th class="c-no">NO</th><th class="c-nama">NAMA LENGKAP</th><th class="c-kelas">TILAWATI</th><th class="c-kelas">TAHFIDZ</th></tr></thead>
         <tbody>${rowsHtml}</tbody>
       </table>
     </section>`;
@@ -2958,7 +3047,7 @@ function buildKelasPrintDocument(kelasFilter){
   .print-table th{ font-weight:bold; text-align:center; }
   .c-no{ width:44px; text-align:center; }
   .c-nama{ text-align:left; }
-  .c-kelas{ width:110px; text-align:center; }
+  .c-kelas{ width:120px; text-align:center; }
 </style></head>
 <body>${pages || '<p style="padding:30px;">Belum ada data siswa.</p>'}</body></html>`;
 }
@@ -3279,7 +3368,7 @@ function renderDashboard(){
     `}
 
     <div class="card" style="padding:20px; margin-top:16px;">
-      <h2 class="section-title">Laporan Minggu Ini &mdash; ${progLabel}</h2>
+      <h2 class="section-title">Laporan Minggu Ini <span class="prog-badge">${progLabel}</span></h2>
       <div class="grid-4" style="margin-bottom:14px;">
         <div class="card stat-card" style="background:var(--teal-soft); border:none;">
           <div class="stat-label">Total Dites</div>
@@ -3514,8 +3603,9 @@ function bindSiswaEvents(){
 
 // Pasang event handler untuk baris-baris tabel siswa (dipanggil ulang tiap
 // kali tabel di-refresh, baik dari render penuh maupun refreshSiswaTable()).
-function bindSiswaRowEvents(){
-  document.querySelectorAll('#siswaTbody tr[data-id]').forEach(tr=>{
+function bindSiswaRowEvents(rows){
+  const list = rows || document.querySelectorAll('#siswaTbody tr[data-id]');
+  Array.from(list).forEach(tr=>{
     const id = tr.getAttribute('data-id');
     tr.querySelector('.siswa-nama').addEventListener('change', (e)=>{
       const val = e.target.value.trim();
@@ -3540,7 +3630,7 @@ function bindSiswaRowEvents(){
         if(s){ s[levelField] = val; s[overrideField] = ''; s[roomField] = ''; s[assignedLevelField] = ''; } // level berubah, cari ruang tetap yang baru
       });
       await ensureAndPersistRoomAssignments();
-      render();
+      refreshSiswaRow(id); // update baris ini saja - tabel & posisi scroll tidak berubah
     });
     const ruanganSel = tr.querySelector('.siswa-ruangan');
     if(ruanganSel){
@@ -3558,7 +3648,7 @@ function bindSiswaRowEvents(){
         const idx = list.findIndex(x=>x.id===id);
         if(idx !== -1) list.splice(idx,1);
       });
-      render();
+      refreshSiswaTable(); // cukup segarkan tabel, tanpa loncat ke atas
     });
   });
 }
@@ -3616,7 +3706,7 @@ function bindGuruRowEvents(){
         const idx = list.findIndex(x=>x.id===id);
         if(idx !== -1) list.splice(idx,1);
       });
-      render();
+      refreshGuruTable();
     });
   });
 }
@@ -3835,23 +3925,32 @@ async function ensureRoomsBothPrograms(){
   }finally{ state.program = prev; }
 }
 
-// Tab "Program Tilawati | Program Tahfidz" di atas halaman yang datanya per-program.
-function addProgramTabs(c){
-  if(!ADMIN_PROGRAM_VIEWS.includes(state.view)) return;
-  const bar = document.createElement('div');
-  bar.className = 'level-tabs';
-  bar.style.marginBottom = '14px';
-  bar.innerHTML = ['tilawati','tahfidz'].map(p=>`<div class="level-tab ${state.program===p?'active':''}" data-admprog="${p}">Program ${p==='tahfidz'?'Tahfidz':'Tilawati'}</div>`).join('');
-  c.prepend(bar);
-  bar.querySelectorAll('[data-admprog]').forEach(el=>el.addEventListener('click', async ()=>{
-    const p = el.getAttribute('data-admprog');
-    if(p === state.program) return;
+// Ganti program aktif (Administrator). Dipanggil dari sub-daftar di sidebar.
+async function setAdminProgram(p){
+  if(p !== state.program){
     state.program = p;
     try{ sessionStorage.setItem('gens-ulba-program-tab', p); }catch(e){ /* abaikan */ }
     state.ujiSiswaId = ''; state.ujiSiswaSearch = ''; state.ujiForm = null;
     await ensureAndPersistRoomAssignments();
+  }
+  render();
+}
+
+// Aksi klik pada sub-daftar sidebar.
+async function applyNavSub(key){
+  if(key === 'cetak:kelas'){
+    state.cetakMode = 'kelas';
     render();
-  }));
+    return;
+  }
+  if(key.indexOf('cetak:ruangan:') === 0){
+    state.cetakMode = 'ruangan';
+    await setAdminProgram(key.split(':')[2]);
+    return;
+  }
+  if(key.indexOf('prog:') === 0){
+    await setAdminProgram(key.split(':')[1]);
+  }
 }
 
 // Konfirmasi dengan mengetik kata tertentu (+ opsi unduh cadangan dulu). Mengembalikan {ok, backup}.
@@ -3989,7 +4088,7 @@ function renderAdmSiswaPage(){
       <div id="admSiswaBody"></div>
     </div>`;
 }
-function refreshAdmSiswa(){
+function refreshAdmSiswa(resetScroll){
   const body = document.getElementById('admSiswaBody');
   if(!body) return;
   const list = admFiltered();
@@ -4006,10 +4105,13 @@ function refreshAdmSiswa(){
       <td>${escapeHtml(s.tilawati||'-')}</td><td>${escapeHtml(s.roomOverride||s.assignedRoom||'-')}</td>
       <td>${escapeHtml(s.tahfidz||'-')}</td><td>${escapeHtml(s.tahfidzRoomOverride||s.tahfidzAssignedRoom||'-')}</td></tr>`).join('');
   const dis = n ? '' : 'disabled';
+  const prevScroll = body.querySelector('.table-scroll') ? body.querySelector('.table-scroll').scrollTop : 0;
+  const prevBulk = {};
+  ['admBulkKelas','admBulkTl','admBulkTh'].forEach(bid=>{ const el = document.getElementById(bid); if(el) prevBulk[bid] = el.value; });
   body.innerHTML = `
     <div class="toolbar" style="margin-bottom:10px;">
       <label style="display:flex; gap:6px; align-items:center; font-size:13px;"><input type="checkbox" id="admSelAll" ${allSel?'checked':''}> Pilih semua hasil filter (${list.length})</label>
-      <span class="pill pill-teal">${n} dipilih</span>
+      <span class="pill pill-teal" id="admSelCount">${n} dipilih</span>
     </div>
     <div class="toolbar" style="margin-bottom:12px;">
       <input type="text" id="admBulkKelas" placeholder="Kelas baru (mis. 4B)" style="width:150px;">
@@ -4029,17 +4131,33 @@ function refreshAdmSiswa(){
       <button class="btn btn-outline btn-sm" id="admPrev" ${admSiswa.page<=1?'disabled':''}>&larr; Sebelumnya</button>
       <button class="btn btn-outline btn-sm" id="admNext" ${admSiswa.page>=pages?'disabled':''}>Berikutnya &rarr;</button>
     </div>`;
+  // Centang hanya memperbarui jumlah, tombol & kotak "pilih semua" di tempat
+  // (tabel TIDAK dibangun ulang), jadi posisi scroll tidak loncat ke atas.
+  const syncAdmSelection = ()=>{
+    const cnt = admSiswa.sel.size;
+    const pill = document.getElementById('admSelCount');
+    if(pill) pill.textContent = cnt + ' dipilih';
+    ['admApplyKelas','admApplyTl','admApplyTh','admDelSel'].forEach(bid=>{
+      const b = document.getElementById(bid); if(b) b.disabled = !cnt;
+    });
+    const all = document.getElementById('admSelAll');
+    if(all) all.checked = list.length > 0 && list.every(x=>admSiswa.sel.has(x.id));
+  };
+  Object.keys(prevBulk).forEach(bid=>{ const el = document.getElementById(bid); if(el) el.value = prevBulk[bid]; });
+  const newScroll = body.querySelector('.table-scroll');
+  if(newScroll && prevScroll && !resetScroll) newScroll.scrollTop = prevScroll;
   document.getElementById('admSelAll').addEventListener('change', (e)=>{
-    list.forEach(s=>{ if(e.target.checked) admSiswa.sel.add(s.id); else admSiswa.sel.delete(s.id); });
-    refreshAdmSiswa();
+    list.forEach(x=>{ if(e.target.checked) admSiswa.sel.add(x.id); else admSiswa.sel.delete(x.id); });
+    body.querySelectorAll('.admChk').forEach(ch=>{ ch.checked = e.target.checked; });
+    syncAdmSelection();
   });
   body.querySelectorAll('.admChk').forEach(ch=>ch.addEventListener('change', ()=>{
     const id = ch.getAttribute('data-id');
     if(ch.checked) admSiswa.sel.add(id); else admSiswa.sel.delete(id);
-    refreshAdmSiswa();
+    syncAdmSelection();
   }));
-  document.getElementById('admPrev').addEventListener('click', ()=>{ admSiswa.page--; refreshAdmSiswa(); });
-  document.getElementById('admNext').addEventListener('click', ()=>{ admSiswa.page++; refreshAdmSiswa(); });
+  document.getElementById('admPrev').addEventListener('click', ()=>{ admSiswa.page--; refreshAdmSiswa(true); });
+  document.getElementById('admNext').addEventListener('click', ()=>{ admSiswa.page++; refreshAdmSiswa(true); });
   document.getElementById('admApplyKelas').addEventListener('click', ()=>admBulkApply('kelas', document.getElementById('admBulkKelas').value));
   document.getElementById('admApplyTl').addEventListener('click', ()=>admBulkApply('tilawati', document.getElementById('admBulkTl').value));
   document.getElementById('admApplyTh').addEventListener('click', ()=>admBulkApply('tahfidz', document.getElementById('admBulkTh').value));
@@ -4077,9 +4195,9 @@ async function admDeleteSelected(){
   render();
 }
 function bindAdmSiswaEvents(){
-  document.getElementById('admQ').addEventListener('input', (e)=>{ admSiswa.q = e.target.value; admSiswa.page = 1; refreshAdmSiswa(); });
+  document.getElementById('admQ').addEventListener('input', (e)=>{ admSiswa.q = e.target.value; admSiswa.page = 1; refreshAdmSiswa(true); });
   [['admKelas','kelas'],['admTl','tl'],['admTh','th']].forEach(([id,key])=>{
-    document.getElementById(id).addEventListener('change', (e)=>{ admSiswa[key] = e.target.value; admSiswa.page = 1; refreshAdmSiswa(); });
+    document.getElementById(id).addEventListener('change', (e)=>{ admSiswa[key] = e.target.value; admSiswa.page = 1; refreshAdmSiswa(true); });
   });
   refreshAdmSiswa();
 }
