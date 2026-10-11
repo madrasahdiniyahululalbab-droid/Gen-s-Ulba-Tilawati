@@ -480,6 +480,86 @@
   }
   .modal-message{font-size:14px; line-height:1.5; margin-bottom:18px; white-space:pre-line;}
   .modal-buttons{display:flex; gap:10px; justify-content:flex-end;}
+
+  /* ======================= TAMPILAN HP (mobile) ======================= */
+  @media (max-width:860px){
+    /* bayangan sidebar hanya muncul saat menu dibuka (sebelumnya bocor di tepi kiri) */
+    #sidebar{box-shadow:none;}
+    #sidebar.open{box-shadow:6px 0 28px rgba(0,0,0,0.28);}
+  }
+  @media (max-width:640px){
+    html{-webkit-text-size-adjust:100%;}
+    /* ---- Header atas: rapat, rapi, judul tidak terhimpit ---- */
+    #topbar{padding:10px 14px; gap:10px; position:sticky; top:0; z-index:40;}
+    #topbar > div:first-child{min-width:0; flex:1 1 auto; gap:10px;}
+    #topbar > div:first-child > div:last-child{min-width:0;}
+    #topbar h1{font-size:19px; line-height:1.2; gap:4px 8px;}
+    #topbar p{font-size:12px; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+    .prog-badge{font-size:10px; padding:3px 9px;}
+    .topbar-right{gap:8px; flex-shrink:0;}
+    .save-badge #saveText{display:none;}
+    .topbar-icon-btn, .topbar-avatar{width:36px; height:36px;}
+    #menuToggle{min-height:36px; min-width:38px; padding:0 !important; justify-content:center; flex-shrink:0;}
+    .topbar-dropdown{position:fixed; left:12px; right:12px; top:62px; min-width:0 !important;}
+
+    /* ---- Isi halaman ---- */
+    #content{padding:14px 12px 28px;}
+    .card{border-radius:16px;}
+    .card[style*="padding:20px"]{padding:14px !important;}
+    .grid-4{gap:10px;}
+    .stat-card{padding:14px; gap:8px;}
+    .stat-value{font-size:26px;}
+    h2.section-title{font-size:16px; margin-bottom:12px;}
+
+    /* ---- Tombol & isian nyaman disentuh (16px = iOS tidak zoom otomatis) ---- */
+    input, select, textarea{font-size:16px !important;}
+    .btn{min-height:40px;}
+    .btn-sm{min-height:38px; padding:8px 12px;}
+    .toolbar{gap:8px;}
+    .toolbar .grow{flex:1 1 100%;}
+    /* isian & pilihan di formulir/toolbar: melebar mengikuti layar, bukan lebar tetap */
+    .toolbar > input:not([type=checkbox]), .toolbar > select{flex:1 1 calc(50% - 8px); width:auto !important; min-width:0; max-width:100%;}
+    .toolbar > input[placeholder*="Nama"], .toolbar > input[placeholder*="Cari"]{flex:1 1 100%;}
+    .toolbar .search-input{width:100%;}
+    .pagination{flex-wrap:wrap; justify-content:center; gap:8px;}
+    .pagination > span{flex:1 1 100%; text-align:center;}
+
+    /* ---- Tab tingkatan: satu baris, geser ke samping ---- */
+    .level-tabs{flex-wrap:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; margin-left:-2px; margin-right:-2px;}
+    .level-tabs::-webkit-scrollbar{display:none;}
+    .level-tab{flex:0 0 auto; white-space:nowrap; padding:9px 14px;}
+
+    /* ---- Dialog ---- */
+    .modal-overlay{padding:14px; align-items:flex-end;}
+    .modal-box{max-width:none; border-radius:18px 18px 14px 14px; padding:20px 18px 16px;}
+    .modal-buttons{flex-wrap:wrap;}
+    .modal-buttons .btn{flex:1 1 auto;}
+
+    /* ---- Tabel lebar (5+ kolom) jadi kartu per baris ---- */
+    .table-scroll:has(table.stack-m){border:0; max-height:none; overflow:visible; border-radius:0;}
+    table.stack-m, table.stack-m tbody{display:block; width:100%;}
+    table.stack-m thead{display:none;}
+    table.stack-m tr{
+      display:block; background:var(--surface); border:1px solid var(--border);
+      border-radius:14px; padding:6px 14px; margin-bottom:10px; box-shadow:0 1px 3px rgba(20,40,80,0.05);
+    }
+    table.stack-m tr:hover td{background:transparent;}
+    table.stack-m td{
+      display:flex; align-items:center; justify-content:space-between; gap:12px;
+      padding:7px 0; border-bottom:1px dashed var(--border); text-align:right; font-size:13.5px; min-height:34px;
+    }
+    table.stack-m td:last-child{border-bottom:0;}
+    table.stack-m td::before{
+      content:attr(data-label); flex:0 0 34%; text-align:left; font-size:10.5px; font-weight:700;
+      text-transform:uppercase; letter-spacing:.06em; color:var(--ink-muted);
+    }
+    table.stack-m td[data-label=""]::before{content:none;}
+    table.stack-m td[data-label=""]{justify-content:flex-end;}
+    table.stack-m td[colspan]{display:block; text-align:center; border:0;}
+    table.stack-m td[colspan]::before{content:none;}
+    table.stack-m td input:not([type=checkbox]), table.stack-m td select{flex:1 1 auto; min-width:0; width:100% !important; max-width:62%;}
+    table.stack-m td input[type=checkbox]{width:20px; height:20px;}
+  }
 </style>
 </head>
 <body>
@@ -4112,6 +4192,8 @@ function refreshAdmSiswa(resetScroll){
     <div class="toolbar" style="margin-bottom:10px;">
       <label style="display:flex; gap:6px; align-items:center; font-size:13px;"><input type="checkbox" id="admSelAll" ${allSel?'checked':''}> Pilih semua hasil filter (${list.length})</label>
       <span class="pill pill-teal" id="admSelCount">${n} dipilih</span>
+      <span id="admSelHidden" style="font-size:12px; color:#B45309; font-weight:600;"></span>
+      <button class="btn btn-outline btn-sm" id="admClearSel" ${dis}>Batal pilih semua</button>
     </div>
     <div class="toolbar" style="margin-bottom:12px;">
       <input type="text" id="admBulkKelas" placeholder="Kelas baru (mis. 4B)" style="width:150px;">
@@ -4137,7 +4219,12 @@ function refreshAdmSiswa(resetScroll){
     const cnt = admSiswa.sel.size;
     const pill = document.getElementById('admSelCount');
     if(pill) pill.textContent = cnt + ' dipilih';
-    ['admApplyKelas','admApplyTl','admApplyTh','admDelSel'].forEach(bid=>{
+    // Beri tahu kalau ada siswa terpilih yang sedang tidak terlihat (beda filter/halaman).
+    const visibleIds = new Set(list.map(x=>x.id));
+    const hiddenCnt = Array.from(admSiswa.sel).filter(id=>!visibleIds.has(id)).length;
+    const hid = document.getElementById('admSelHidden');
+    if(hid) hid.textContent = hiddenCnt ? `(${hiddenCnt} terpilih sedang tidak tampil karena filter)` : '';
+    ['admApplyKelas','admApplyTl','admApplyTh','admDelSel','admClearSel'].forEach(bid=>{
       const b = document.getElementById(bid); if(b) b.disabled = !cnt;
     });
     const all = document.getElementById('admSelAll');
@@ -4158,6 +4245,12 @@ function refreshAdmSiswa(resetScroll){
   }));
   document.getElementById('admPrev').addEventListener('click', ()=>{ admSiswa.page--; refreshAdmSiswa(true); });
   document.getElementById('admNext').addEventListener('click', ()=>{ admSiswa.page++; refreshAdmSiswa(true); });
+  document.getElementById('admClearSel').addEventListener('click', ()=>{
+    admSiswa.sel.clear();
+    body.querySelectorAll('.admChk').forEach(ch=>{ ch.checked = false; });
+    syncAdmSelection();
+  });
+  syncAdmSelection();
   document.getElementById('admApplyKelas').addEventListener('click', ()=>admBulkApply('kelas', document.getElementById('admBulkKelas').value));
   document.getElementById('admApplyTl').addEventListener('click', ()=>admBulkApply('tilawati', document.getElementById('admBulkTl').value));
   document.getElementById('admApplyTh').addEventListener('click', ()=>admBulkApply('tahfidz', document.getElementById('admBulkTh').value));
@@ -4169,7 +4262,10 @@ async function admBulkApply(field, val){
   const names = {kelas:'Kelas', tilawati:'Tilawati', tahfidz:'Tahfidz'};
   if(!val || !val.trim()){ await showAlert(field === 'kelas' ? 'Isi kelas barunya dulu.' : 'Pilih levelnya dulu.'); return; }
   const newVal = val === '__NONE__' ? '' : val.trim();
-  const ok = await showConfirm(`Ubah ${names[field]} untuk ${ids.size} siswa menjadi "${newVal || '(kosong)'}"?`, 'Ya, Ubah');
+  const picked = state.siswaList.filter(x=>ids.has(x.id));
+  const shown = picked.slice(0,6).map(x=>x.nama).join(', ');
+  const more = picked.length > 6 ? ` dan ${picked.length - 6} siswa lainnya` : '';
+  const ok = await showConfirm(`Ubah ${names[field]} untuk ${ids.size} siswa menjadi "${newVal || '(kosong)'}"?\n\nSiswa: ${shown}${more}.`, 'Ya, Ubah');
   if(!ok) return;
   await safeListUpdate('siswa-list', 'siswaList', list=>{
     list.forEach(s=>{
@@ -4180,6 +4276,9 @@ async function admBulkApply(field, val){
     });
   });
   await ensureRoomsBothPrograms();
+  // Kosongkan pilihan setelah diterapkan, supaya siswa yang sama TIDAK ikut
+  // berubah lagi saat Anda menerapkan level lain ke kelompok siswa berikutnya.
+  admSiswa.sel.clear();
   render();
 }
 async function admDeleteSelected(){
@@ -4268,6 +4367,36 @@ function bindAdmKenaikanEvents(){
 document.getElementById('menuToggle').addEventListener('click', ()=>{
   document.getElementById('sidebar').classList.toggle('open');
 });
+// Tap di area konten saat menu terbuka -> menu menutup (nyaman di HP).
+document.getElementById('main').addEventListener('click', (e)=>{
+  const sb = document.getElementById('sidebar');
+  if(sb.classList.contains('open') && !e.target.closest('#menuToggle')) sb.classList.remove('open');
+});
+
+/* ======================= TABEL RESPONSIF (mobile) =======================
+   Beri label kolom (data-label) pada tiap sel supaya di layar HP tabel lebar
+   tampil sebagai kartu per baris. Dijalankan otomatis tiap isi halaman berubah. */
+function labelResponsiveTables(root){
+  (root || document).querySelectorAll('table.data-table').forEach(t=>{
+    const ths = Array.from(t.querySelectorAll('thead th')).map(th=>th.textContent.trim());
+    if(ths.length >= 5) t.classList.add('stack-m');
+    t.querySelectorAll('tbody tr').forEach(tr=>{
+      const cells = Array.from(tr.children);
+      if(cells.length === 1 && cells[0].hasAttribute('colspan')) return;
+      cells.forEach((td,i)=>{
+        if(td.hasAttribute('data-label')) return;
+        const hasChk = !ths[i] && td.querySelector('input[type=checkbox]');
+        td.setAttribute('data-label', ths[i] || (hasChk ? 'Pilih' : ''));
+      });
+    });
+  });
+}
+let _rtPending = false;
+new MutationObserver(()=>{
+  if(_rtPending) return;
+  _rtPending = true;
+  requestAnimationFrame(()=>{ _rtPending = false; labelResponsiveTables(document.getElementById('content')); });
+}).observe(document.getElementById('content'), {childList:true, subtree:true});
 
 /* ======================= NAVBAR: notifikasi & user dropdown ======================= */
 document.getElementById('notifBellBtn').addEventListener('click', (e)=>{
