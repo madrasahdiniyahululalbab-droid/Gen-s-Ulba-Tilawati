@@ -913,7 +913,6 @@ const state = {
   cetakLevel: LEVELS[0].label,
   cetakRoom: '__ALL__',
   cetakMode: 'ruangan', // 'ruangan' | 'kelas' | 'guru'
-  cetakGuruProg: 'semua', // 'semua' | 'tilawati' | 'tahfidz' (Cetak Penempatan Ruang Guru)
   cetakKelas: '__ALL__',
   riwayatInfoId: '', // id record riwayat yang lagi dibuka panel info-nya
 
@@ -1643,7 +1642,7 @@ function setPage(){
   const badge = (!isAdm && !gabungan) ? `<span class="prog-badge">${escapeHtml(programLabel())}</span>` : '';
   document.getElementById('pageTitle').innerHTML = escapeHtml(baseTitle) + badge;
   document.getElementById('pageSub').textContent = gabungan
-    ? (state.cetakMode === 'guru' ? 'Cetak penempatan guru per ruangan (tanpa daftar siswa)' : 'Cetak daftar siswa per kelas (Tilawati & Tahfidz dalam satu daftar)')
+    ? (state.cetakMode === 'guru' ? 'Penempatan guru: ruangan & tingkat yang diajar di Tilawati dan Tahfidz (tanpa daftar siswa)' : 'Cetak daftar siswa per kelas (Tilawati & Tahfidz dalam satu daftar)')
     : (isAdm ? meta.sub : meta.sub.replace(/Tilawati/g, programLabel()));
 }
 
@@ -3151,103 +3150,117 @@ function buildKelasPrintDocument(kelasFilter){
 }
 
 /* ======================= CETAK PENEMPATAN RUANG GURU (tanpa siswa) ======================= */
-// Kelompokkan guru per ruangan untuk satu daftar guru.
-function getGuruRoomGroups(guruList){
-  const byRoom = {};
-  const tanpaRuang = [];
-  guruList.forEach(g=>{
-    if(g.ruangan){ (byRoom[g.ruangan] = byRoom[g.ruangan] || []).push(g); }
-    else tanpaRuang.push(g);
-  });
-  const rooms = Object.keys(byRoom).sort((a,b)=>a.localeCompare(b,'id',{numeric:true, sensitivity:'base'}));
-  return {
-    rooms: rooms.map(r=>({room:r, list:byRoom[r]})),
-    tanpaRuang
-  };
+// Tingkat yang diajar seorang guru, diturunkan dari kodenya (GT2 -> Tilawati 2,
+// GTh3 -> Munaqis 3, GAQ -> Al-Qur'an, PT -> Penguji Test, dst).
+function guruTingkatLabel(g, prog){
+  const lv = (prog === 'tahfidz' ? LEVELS_TAHFIDZ : LEVELS).find(l=>l.kode === g.kode);
+  if(lv) return lv.label;
+  const grp = (prog === 'tahfidz' ? GURU_PRINT_GROUPS_TAHFIDZ : GURU_PRINT_GROUPS).find(x=>x.kode === g.kode);
+  if(grp) return grp.label.replace(/^.*?\u2014\s*/, '');
+  return g.kode || '-';
 }
-function guruProgramSections(){
-  const pick = state.cetakGuruProg;
-  const all = [
-    {key:'tilawati', label:'Tilawati', list:state.guruList || []},
-    {key:'tahfidz',  label:'Tahfidz',  list:state.guruListTahfidz || []},
-  ];
-  return all.filter(x=> pick === 'semua' || pick === x.key);
+// Satu baris per guru (digabung dari data Tilawati & Tahfidz berdasarkan nama):
+// ruangan & tingkat di Tilawati, serta ruangan & tingkat di Tahfidz.
+function getGuruGabungan(){
+  const map = new Map();
+  const add = (g, prog)=>{
+    const nama = (g.nama || '').trim().replace(/\s+/g, ' ');
+    if(!nama) return;
+    const key = nama.toUpperCase();
+    let e = map.get(key);
+    if(!e){ e = {nama, tilawati:[], tahfidz:[]}; map.set(key, e); }
+    e[prog].push({ruangan: g.ruangan || '', tingkat: guruTingkatLabel(g, prog)});
+  };
+  (state.guruList || []).forEach(g=>add(g, 'tilawati'));
+  (state.guruListTahfidz || []).forEach(g=>add(g, 'tahfidz'));
+  return Array.from(map.values()).sort((a,b)=>a.nama.localeCompare(b.nama, 'id', {sensitivity:'base'}));
+}
+// Isi sel (ruangan / tingkat) - kalau guru mengajar >1 ruang di satu program, ditulis berbaris.
+function guruCell(list, field){
+  if(!list.length) return '-';
+  return list.map(x=>escapeHtml(x[field] || '-')).join('<br>');
 }
 function renderCetakGuruTab(){
-  const sections = guruProgramSections();
-  const opt = (v,l)=>`<option value="${v}" ${state.cetakGuruProg===v?'selected':''}>${l}</option>`;
-  const body = sections.map(sec=>{
-    const g = getGuruRoomGroups(sec.list);
-    const rows = g.rooms.map((x,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(x.room)}</td><td>${x.list.map((gr,gi)=>`<div>${gi+1}. ${escapeHtml(gr.nama)}${gr.kode?` <span style="color:var(--ink-muted); font-size:12px;">(${escapeHtml(gr.kode)})</span>`:''}</div>`).join('')}</td></tr>`).join('')
-      + (g.tanpaRuang.length ? `<tr><td>-</td><td>Belum ada ruangan</td><td>${g.tanpaRuang.map((gr,gi)=>`<div>${gi+1}. ${escapeHtml(gr.nama)}</div>`).join('')}</td></tr>` : '');
-    return `
-      <div style="margin-bottom:18px;">
-        <div style="font-weight:700; margin-bottom:6px; color:var(--teal-dark);">Guru ${escapeHtml(sec.label)} <span style="font-weight:400; color:var(--ink-muted);">&mdash; ${sec.list.length} guru, ${g.rooms.length} ruangan</span></div>
-        <div class="table-scroll" style="max-height:none;">
-          <table class="data-table">
-            <thead><tr><th style="width:44px;">No</th><th style="width:130px;">Ruangan</th><th>Guru</th></tr></thead>
-            <tbody>${rows || '<tr><td colspan="3"><div class="empty-state">Belum ada data guru.</div></td></tr>'}</tbody>
-          </table>
-        </div>
-      </div>`;
-  }).join('');
+  const rows = getGuruGabungan();
+  const c = 'text-align:center; vertical-align:middle;';
+  const body = rows.map((g,i)=>`<tr>
+      <td style="${c}">${i+1}</td>
+      <td style="vertical-align:middle; font-weight:600;">${escapeHtml(g.nama)}</td>
+      <td style="${c}">${guruCell(g.tilawati,'ruangan')}</td>
+      <td style="${c}">${guruCell(g.tilawati,'tingkat')}</td>
+      <td style="${c}">${guruCell(g.tahfidz,'ruangan')}</td>
+      <td style="${c}">${guruCell(g.tahfidz,'tingkat')}</td>
+    </tr>`).join('');
   return `
     <div class="card" style="padding:20px;">
       <div class="toolbar">
-        <select id="cetakGuruProgSelect" style="width:260px;">${opt('semua','Semua program (Tilawati & Tahfidz)')}${opt('tilawati','Guru Tilawati saja')}${opt('tahfidz','Guru Tahfidz saja')}</select>
         <button class="btn btn-primary" id="btnCetakGuruRuang">&#128424; Cetak</button>
+        <span style="font-size:12.5px; color:var(--ink-muted);">${rows.length} guru &middot; Tilawati &amp; Tahfidz dalam satu daftar</span>
       </div>
-      <div style="margin-top:14px;">${body}</div>
+      <div class="table-scroll" style="max-height:none; margin-top:12px;">
+        <table class="data-table">
+          <thead><tr>
+            <th style="width:44px; text-align:center;">No</th>
+            <th>Nama Guru</th>
+            <th style="text-align:center;">Ruang Tilawati</th>
+            <th style="text-align:center;">Tingkat Tilawati</th>
+            <th style="text-align:center;">Ruang Tahfidz</th>
+            <th style="text-align:center;">Tingkat Tahfidz</th>
+          </tr></thead>
+          <tbody>${body || '<tr><td colspan="6"><div class="empty-state">Belum ada data guru.</div></td></tr>'}</tbody>
+        </table>
+      </div>
     </div>`;
 }
 function buildGuruRoomPrintDocument(){
   const tanggal = formatTanggalIndo(new Date());
-  const pages = guruProgramSections().map(sec=>{
-    const g = getGuruRoomGroups(sec.list);
-    const listHtml = (arr)=> arr.map((gr,gi)=>`<div class="g-item">${gi+1}. ${escapeHtml(gr.nama)}</div>`).join('');
-    const rows = g.rooms.map((x,i)=>`<tr><td class="c-no">${i+1}</td><td class="c-ruang">${escapeHtml(x.room)}</td><td class="c-nama">${listHtml(x.list)}</td></tr>`).join('')
-      + (g.tanpaRuang.length ? `<tr><td class="c-no">-</td><td class="c-ruang">Belum ada ruangan</td><td class="c-nama">${listHtml(g.tanpaRuang)}</td></tr>` : '');
-    return `
-    <section class="print-page">
-      <div class="edaran-head">
-        <img src="${LOGO1_DATA}" class="edaran-logo">
-        <div class="edaran-titles">
-          <div class="edaran-title">PENEMPATAN RUANG GURU ${escapeHtml(sec.label.toUpperCase())}</div>
-          <div class="edaran-sub">SD ISLAM ULUL ALBAB</div>
-        </div>
-        <img src="${LOGO2_DATA}" class="edaran-logo">
-      </div>
-      <div class="edaran-tanggal">${escapeHtml(tanggal)}</div>
-      <table class="print-table">
-        <thead><tr><th class="c-no">NO</th><th class="c-ruang">RUANGAN</th><th class="c-nama">GURU</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="3" style="text-align:center;">Belum ada data guru.</td></tr>'}</tbody>
-      </table>
-    </section>`;
-  }).join('');
+  const rows = getGuruGabungan().map((g,i)=>`<tr>
+      <td class="c-no">${i+1}</td>
+      <td class="c-nama">${escapeHtml(g.nama)}</td>
+      <td class="c-mid">${guruCell(g.tilawati,'ruangan')}</td>
+      <td class="c-mid">${guruCell(g.tilawati,'tingkat')}</td>
+      <td class="c-mid">${guruCell(g.tahfidz,'ruangan')}</td>
+      <td class="c-mid">${guruCell(g.tahfidz,'tingkat')}</td>
+    </tr>`).join('');
   return `<!DOCTYPE html>
 <html lang="id"><head><meta charset="UTF-8"><title>Penempatan Ruang Guru</title>
 <style>
   @page{ size:A4; margin:16mm; }
   *{box-sizing:border-box;}
   body{ font-family:'Cambria','Georgia',serif; color:#000; margin:0; }
-  .print-page{ page-break-after:always; }
-  .print-page:last-child{ page-break-after:auto; }
   .edaran-head{ display:flex; align-items:center; justify-content:center; gap:16px; }
   .edaran-logo{ width:52px; height:52px; object-fit:contain; }
   .edaran-titles{ flex:1; text-align:center; }
   .edaran-title{ font-size:20px; font-weight:bold; text-align:center; line-height:1.3; }
   .edaran-sub{ font-size:13px; text-align:center; }
   .edaran-tanggal{ font-size:12px; text-align:right; padding-bottom:6px; margin-bottom:12px; border-bottom:1px solid #000; }
-  .print-table{ width:100%; border-collapse:collapse; font-size:13px; }
-  .print-table th, .print-table td{ border:1px solid #000; padding:6px 9px; vertical-align:top; }
-  .print-table th{ font-weight:bold; text-align:center; }
-  .c-no{ width:44px; text-align:center; }
-  .c-ruang{ width:130px; text-align:center; font-weight:bold; }
+  .print-table{ width:100%; border-collapse:collapse; font-size:12.5px; }
+  .print-table th, .print-table td{ border:1px solid #000; padding:6px 8px; vertical-align:middle; }
+  .print-table th{ font-weight:bold; text-align:center; background:#f1f1f1; }
+  .c-no{ width:38px; text-align:center; }
   .c-nama{ text-align:left; }
-  .g-item{ line-height:1.55; }
+  .c-mid{ width:84px; text-align:center; }
+  .print-table thead{ display:table-header-group; }
   .print-table tr{ page-break-inside:avoid; }
 </style></head>
-<body>${pages || '<p style="padding:30px;">Belum ada data guru.</p>'}</body></html>`;
+<body>
+  <div class="edaran-head">
+    <img src="${LOGO1_DATA}" class="edaran-logo">
+    <div class="edaran-titles">
+      <div class="edaran-title">PENEMPATAN RUANG GURU</div>
+      <div class="edaran-sub">SD ISLAM ULUL ALBAB</div>
+    </div>
+    <img src="${LOGO2_DATA}" class="edaran-logo">
+  </div>
+  <div class="edaran-tanggal">${escapeHtml(tanggal)}</div>
+  <table class="print-table">
+    <thead>
+      <tr><th class="c-no" rowspan="2">NO</th><th class="c-nama" rowspan="2">NAMA GURU</th><th colspan="2">TILAWATI</th><th colspan="2">TAHFIDZ</th></tr>
+      <tr><th class="c-mid">RUANGAN</th><th class="c-mid">TINGKAT</th><th class="c-mid">RUANGAN</th><th class="c-mid">TINGKAT</th></tr>
+    </thead>
+    <tbody>${rows || '<tr><td colspan="6" style="text-align:center;">Belum ada data guru.</td></tr>'}</tbody>
+  </table>
+</body></html>`;
 }
 
 function doPrint(mode){
@@ -4055,8 +4068,6 @@ function bindCetakEvents(){
   if(kelasSelect){
     kelasSelect.addEventListener('change', (e)=>{ state.cetakKelas = e.target.value; render(); });
   }
-  const guruProgSel = document.getElementById('cetakGuruProgSelect');
-  if(guruProgSel) guruProgSel.addEventListener('change', (e)=>{ state.cetakGuruProg = e.target.value; render(); });
   const btnCetakGuruRuang = document.getElementById('btnCetakGuruRuang');
   if(btnCetakGuruRuang) btnCetakGuruRuang.addEventListener('click', ()=>doPrint('guru'));
   const btnCetakKelas = document.getElementById('btnCetakKelas');
@@ -4310,9 +4321,11 @@ function refreshAdmSiswa(resetScroll){
       <td>${escapeHtml(s.tilawati||'-')}</td><td>${escapeHtml(s.roomOverride||s.assignedRoom||'-')}</td>
       <td>${escapeHtml(s.tahfidz||'-')}</td><td>${escapeHtml(s.tahfidzRoomOverride||s.tahfidzAssignedRoom||'-')}</td></tr>`).join('');
   const dis = n ? '' : 'disabled';
+  const roomOpts = (prog)=> '<option value="">— pilih ruang —</option><option value="__AUTO__">Otomatis (pembagian sistem)</option>'
+    + admRoomsOf(prog).map(r=>`<option value="${escapeAttr(r)}">${escapeHtml(r)}</option>`).join('');
   const prevScroll = body.querySelector('.table-scroll') ? body.querySelector('.table-scroll').scrollTop : 0;
   const prevBulk = {};
-  ['admBulkKelas','admBulkTl','admBulkTh'].forEach(bid=>{ const el = document.getElementById(bid); if(el) prevBulk[bid] = el.value; });
+  ['admBulkKelas','admBulkTl','admBulkTh','admBulkRoomTl','admBulkRoomTh'].forEach(bid=>{ const el = document.getElementById(bid); if(el) prevBulk[bid] = el.value; });
   body.innerHTML = `
     <div class="toolbar" style="margin-bottom:10px;">
       <label style="display:flex; gap:6px; align-items:center; font-size:13px;"><input type="checkbox" id="admSelAll" ${allSel?'checked':''}> Pilih semua hasil filter (${list.length})</label>
@@ -4327,10 +4340,16 @@ function refreshAdmSiswa(resetScroll){
       <button class="btn btn-outline btn-sm" id="admApplyTl" ${dis}>Terapkan Tilawati</button>
       <select id="admBulkTh" style="width:140px;">${lv(LEVEL_LABELS_TAHFIDZ)}</select>
       <button class="btn btn-outline btn-sm" id="admApplyTh" ${dis}>Terapkan Tahfidz</button>
+    </div>
+    <div class="toolbar" style="margin-bottom:12px;">
+      <select id="admBulkRoomTl" style="width:150px;">${roomOpts('tilawati')}</select>
+      <button class="btn btn-outline btn-sm" id="admApplyRoomTl" ${dis}>Terapkan Ruang Tilawati</button>
+      <select id="admBulkRoomTh" style="width:150px;">${roomOpts('tahfidz')}</select>
+      <button class="btn btn-outline btn-sm" id="admApplyRoomTh" ${dis}>Terapkan Ruang Tahfidz</button>
       <button class="btn btn-danger btn-sm" id="admDelSel" ${dis}>&#128465; Hapus terpilih</button>
     </div>
     <div class="table-scroll"><table class="data-table">
-      <thead><tr><th style="width:36px;"></th><th>Nama</th><th>Kelas</th><th>Tilawati</th><th>Ruang</th><th>Tahfidz</th><th>Ruang</th></tr></thead>
+      <thead><tr><th style="width:36px;"></th><th>Nama</th><th>Kelas</th><th>Tilawati</th><th>Ruang Tilawati</th><th>Tahfidz</th><th>Ruang Tahfidz</th></tr></thead>
       <tbody>${rows || '<tr><td colspan="7"><div class="empty-state">Tidak ada siswa yang cocok.</div></td></tr>'}</tbody>
     </table></div>
     <div class="pagination">
@@ -4349,7 +4368,7 @@ function refreshAdmSiswa(resetScroll){
     const hiddenCnt = Array.from(admSiswa.sel).filter(id=>!visibleIds.has(id)).length;
     const hid = document.getElementById('admSelHidden');
     if(hid) hid.textContent = hiddenCnt ? `(${hiddenCnt} terpilih sedang tidak tampil karena filter)` : '';
-    ['admApplyKelas','admApplyTl','admApplyTh','admDelSel','admClearSel'].forEach(bid=>{
+    ['admApplyKelas','admApplyTl','admApplyTh','admApplyRoomTl','admApplyRoomTh','admDelSel','admClearSel'].forEach(bid=>{
       const b = document.getElementById(bid); if(b) b.disabled = !cnt;
     });
     const all = document.getElementById('admSelAll');
@@ -4379,7 +4398,61 @@ function refreshAdmSiswa(resetScroll){
   document.getElementById('admApplyKelas').addEventListener('click', ()=>admBulkApply('kelas', document.getElementById('admBulkKelas').value));
   document.getElementById('admApplyTl').addEventListener('click', ()=>admBulkApply('tilawati', document.getElementById('admBulkTl').value));
   document.getElementById('admApplyTh').addEventListener('click', ()=>admBulkApply('tahfidz', document.getElementById('admBulkTh').value));
+  document.getElementById('admApplyRoomTl').addEventListener('click', ()=>admBulkRoom('tilawati', document.getElementById('admBulkRoomTl').value));
+  document.getElementById('admApplyRoomTh').addEventListener('click', ()=>admBulkRoom('tahfidz', document.getElementById('admBulkRoomTh').value));
   document.getElementById('admDelSel').addEventListener('click', admDeleteSelected);
+}
+/* ---- Penempatan ruang massal (Tilawati & Tahfidz) ---- */
+const ADM_ROOM_CFG = {
+  tilawati:{label:'Tilawati', levelField:'tilawati', overrideField:'roomOverride',        roomField:'assignedRoom',        guruKey:'guruList',       quotaKey:'roomQuota',        defQuota:()=>DEFAULT_QUOTA},
+  tahfidz: {label:'Tahfidz',  levelField:'tahfidz',  overrideField:'tahfidzRoomOverride', roomField:'tahfidzAssignedRoom', guruKey:'guruListTahfidz', quotaKey:'roomQuotaTahfidz', defQuota:()=>DEFAULT_QUOTA_TAHFIDZ},
+};
+// Semua ruang yang ada (dari data guru) untuk satu program, tanpa peduli program yang sedang aktif.
+function admRoomsOf(prog){
+  const cfg = ADM_ROOM_CFG[prog]; const seen = [];
+  (state[cfg.guruKey] || []).forEach(g=>{ if(g.ruangan && !seen.includes(g.ruangan)) seen.push(g.ruangan); });
+  return seen.sort((a,b)=>a.localeCompare(b,'id',{numeric:true, sensitivity:'base'}));
+}
+function admRoomQuotaOf(prog, room){
+  const cfg = ADM_ROOM_CFG[prog];
+  const q = (state[cfg.quotaKey] || {})[room];
+  return (q && q > 0) ? q : cfg.defQuota();
+}
+async function admBulkRoom(prog, val){
+  const ids = new Set(admSiswa.sel);
+  if(!ids.size) return;
+  const cfg = ADM_ROOM_CFG[prog];
+  if(!val){ await showAlert('Pilih ruangnya dulu.'); return; }
+  const auto = (val === '__AUTO__');
+  const picked = state.siswaList.filter(x=>ids.has(x.id));
+  // Ruang hanya bermakna untuk siswa yang sudah punya tingkatan di program ini.
+  const eligible = picked.filter(x=>x[cfg.levelField]);
+  const skipped = picked.length - eligible.length;
+  if(!eligible.length){
+    await showAlert(`Siswa yang dipilih belum punya tingkatan ${cfg.label}, jadi belum bisa ditempatkan di ruang. Isi tingkatannya dulu.`);
+    return;
+  }
+  const eligIds = new Set(eligible.map(x=>x.id));
+  const shown = eligible.slice(0,6).map(x=>x.nama).join(', ');
+  const more = eligible.length > 6 ? ` dan ${eligible.length - 6} siswa lainnya` : '';
+  let msg;
+  if(auto){
+    msg = `Kembalikan ${eligible.length} siswa ke pembagian ruang OTOMATIS (${cfg.label})?`;
+  }else{
+    const now = state.siswaList.filter(x=>x[cfg.levelField] && !eligIds.has(x.id) && (x[cfg.overrideField] || x[cfg.roomField]) === val).length;
+    const after = now + eligible.length, quota = admRoomQuotaOf(prog, val);
+    msg = `Tempatkan ${eligible.length} siswa di Ruang ${val} (${cfg.label})?\n\nIsi ruang setelah ini: ${after} dari kuota ${quota}.`
+        + (after > quota ? `\nPERHATIAN: melebihi kuota ruang sebanyak ${after - quota} siswa.` : '');
+  }
+  msg += `\n\nSiswa: ${shown}${more}.` + (skipped ? `\n${skipped} siswa terpilih dilewati karena belum punya tingkatan ${cfg.label}.` : '');
+  const ok = await showConfirm(msg, 'Ya, Terapkan');
+  if(!ok) return;
+  await safeListUpdate('siswa-list', 'siswaList', list=>{
+    list.forEach(x=>{ if(eligIds.has(x.id)) x[cfg.overrideField] = auto ? '' : val; });
+  });
+  await ensureRoomsBothPrograms();
+  admSiswa.sel.clear();
+  render();
 }
 async function admBulkApply(field, val){
   const ids = new Set(admSiswa.sel);
