@@ -912,7 +912,8 @@ const state = {
 
   cetakLevel: LEVELS[0].label,
   cetakRoom: '__ALL__',
-  cetakMode: 'ruangan', // 'ruangan' | 'kelas'
+  cetakMode: 'ruangan', // 'ruangan' | 'kelas' | 'guru'
+  cetakGuruProg: 'semua', // 'semua' | 'tilawati' | 'tahfidz' (Cetak Penempatan Ruang Guru)
   cetakKelas: '__ALL__',
   riwayatInfoId: '', // id record riwayat yang lagi dibuka panel info-nya
 
@@ -1367,6 +1368,12 @@ function getGuruForRoom(roomName){
     .join(' & ');
 }
 
+// Daftar nama guru di sebuah ruang (array) - dipakai untuk cetak: guru ditulis
+// ke bawah dengan nomor (1. 2. dst), bukan menyamping.
+function getGuruNamesForRoom(roomName){
+  return activeGuruList().filter(g=>g.ruangan === roomName).map(g=>g.nama);
+}
+
 function getQuotaForRoom(roomName){
   const q = activeRoomQuota()[roomName];
   return (q && q > 0) ? q : activeDefaultQuota();
@@ -1578,11 +1585,12 @@ let lastAnimatedView = null;
 function getNavSubItems(viewId){
   if(!state.adminMode) return null;
   if(viewId === 'cetak'){
-    const kelas = state.cetakMode === 'kelas';
+    const ruang = state.cetakMode !== 'kelas' && state.cetakMode !== 'guru';
     return [
-      {key:'cetak:ruangan:tilawati', label:'Ruangan Tilawati', active: !kelas && state.program==='tilawati'},
-      {key:'cetak:ruangan:tahfidz',  label:'Ruangan Tahfidz',  active: !kelas && state.program==='tahfidz'},
-      {key:'cetak:kelas',            label:'Kelas (Gabungan)', active: kelas},
+      {key:'cetak:ruangan:tilawati', label:'Ruangan Tilawati', active: ruang && state.program==='tilawati'},
+      {key:'cetak:ruangan:tahfidz',  label:'Ruangan Tahfidz',  active: ruang && state.program==='tahfidz'},
+      {key:'cetak:kelas',            label:'Kelas (Gabungan)', active: state.cetakMode==='kelas'},
+      {key:'cetak:guru',             label:'Penempatan Ruang Guru', active: state.cetakMode==='guru'},
     ];
   }
   if(ADMIN_PROGRAM_VIEWS.includes(viewId)){
@@ -1626,7 +1634,7 @@ function renderNav(){
 function setPage(){
   const meta = PAGE_META[state.view];
   const isAdm = state.view.startsWith('adm-');
-  const gabungan = (state.view === 'cetak' && state.cetakMode === 'kelas');
+  const gabungan = (state.view === 'cetak' && (state.cetakMode === 'kelas' || state.cetakMode === 'guru'));
   // Judul halaman selalu sama dengan nama menu di sidebar, dengan penanda
   // program (Tilawati/Tahfidz) berbentuk label di sebelahnya - seragam di semua halaman.
   const navList = state.adminMode ? ADMIN_NAV_ITEMS : NAV_ITEMS;
@@ -1635,7 +1643,7 @@ function setPage(){
   const badge = (!isAdm && !gabungan) ? `<span class="prog-badge">${escapeHtml(programLabel())}</span>` : '';
   document.getElementById('pageTitle').innerHTML = escapeHtml(baseTitle) + badge;
   document.getElementById('pageSub').textContent = gabungan
-    ? 'Cetak daftar siswa per kelas (Tilawati & Tahfidz dalam satu daftar)'
+    ? (state.cetakMode === 'guru' ? 'Cetak penempatan guru per ruangan (tanpa daftar siswa)' : 'Cetak daftar siswa per kelas (Tilawati & Tahfidz dalam satu daftar)')
     : (isAdm ? meta.sub : meta.sub.replace(/Tilawati/g, programLabel()));
 }
 
@@ -2796,6 +2804,9 @@ function renderCetakPage(){
   if(state.cetakMode === 'kelas'){
     return modeTabs + renderCetakKelasTab();
   }
+  if(state.cetakMode === 'guru'){
+    return modeTabs + renderCetakGuruTab();
+  }
 
   if(!tahfidzMode && state.cetakLevel === '__ARSIP__'){
     return modeTabs + renderArsipTab();
@@ -2831,7 +2842,7 @@ function renderCetakPage(){
         <select id="cetakRoomSelect" style="width:260px;">${roomOptions}</select>
         <button class="btn btn-primary" id="btnCetak">&#128424; Cetak</button>
         <button class="btn btn-outline" id="btnCsv">&#8681; Excel</button>
-        ${tahfidzMode ? '' : '<button class="btn btn-outline" id="btnCetakSemua">&#128424; Cetak Semua Data</button>'}
+        <button class="btn btn-outline" id="btnCetakSemua">&#128424; Cetak Semua Data</button>
       </div>
       <div style="margin-top:14px;">
         ${roomsForTab.length===0 ? `<div class="empty-state">Belum ada ruangan untuk tingkatan ini.</div>` :
@@ -3000,7 +3011,9 @@ function buildPrintDocument(mode){
       rowsHtml += `<tr><td class="c-no">${i+1}</td><td class="c-nama">${s?escapeHtml(s.nama):''}</td><td class="c-kelas">${s?escapeHtml(s.kelas||''):''}</td>${tilawatiCell}</tr>`;
     }
     const levelTitle = r.levels.length>1
-      ? `${lblUpper} ${r.levels.map(l=>escapeHtml(l.replace('Tilawati ',''))).join(' & ')}`
+      ? (isTahfidz()
+          ? r.levels.map(l=>escapeHtml(l.toUpperCase())).join(' & ')
+          : `${lblUpper} ${r.levels.map(l=>escapeHtml(l.replace('Tilawati ',''))).join(' & ')}`)
       : escapeHtml((mode==='all' ? r.levels[0]||'' : state.cetakLevel).toUpperCase());
     return `
     <section class="print-page">
@@ -3012,10 +3025,13 @@ function buildPrintDocument(mode){
         </div>
         <img src="${LOGO2_DATA}" class="edaran-logo">
       </div>
-      <div class="edaran-guru">Guru: ${escapeHtml(r.guru)||'-'}</div>
+      <div class="edaran-guru">
+        <div class="edaran-guru-label">Guru:</div>
+        ${(()=>{ const gl = getGuruNamesForRoom(r.room); return gl.length ? gl.map((n,gi)=>`<div class="edaran-guru-item">${gi+1}. ${escapeHtml(n)}</div>`).join('') : '<div class="edaran-guru-item">-</div>'; })()}
+      </div>
       <div class="edaran-tanggal">${escapeHtml(tanggal)}</div>
       <table class="print-table">
-        <thead><tr><th class="c-no">NO</th><th class="c-nama">NAMA LENGKAP</th><th class="c-kelas">KELAS</th>${r.levels.length>1?'<th class="c-tilawati">TILAWATI</th>':''}</tr></thead>
+        <thead><tr><th class="c-no">NO</th><th class="c-nama">NAMA LENGKAP</th><th class="c-kelas">KELAS</th>${r.levels.length>1?`<th class="c-tilawati">${lblUpper}</th>`:''}</tr></thead>
         <tbody>${rowsHtml}</tbody>
       </table>
     </section>`;
@@ -3033,7 +3049,9 @@ function buildPrintDocument(mode){
   .edaran-logo{ width:52px; height:52px; object-fit:contain; }
   .edaran-titles{ flex:1; text-align:center; }
   .edaran-title{ font-size:22px; font-weight:bold; text-align:center; line-height:1.3; }
-  .edaran-guru{ font-size:14px; font-weight:bold; text-align:left; margin-top:6px; }
+  .edaran-guru{ font-size:14px; text-align:left; margin-top:6px; }
+  .edaran-guru-label{ font-weight:bold; }
+  .edaran-guru-item{ font-weight:bold; padding-left:18px; line-height:1.5; }
   .edaran-tanggal{ font-size:12px; text-align:right; padding-bottom:6px; margin-bottom:12px; border-bottom:1px solid #000; }
   .print-table{ width:100%; border-collapse:collapse; font-size:13px; }
   .print-table th, .print-table td{ border:1px solid #000; padding:5px 9px; }
@@ -3132,6 +3150,106 @@ function buildKelasPrintDocument(kelasFilter){
 <body>${pages || '<p style="padding:30px;">Belum ada data siswa.</p>'}</body></html>`;
 }
 
+/* ======================= CETAK PENEMPATAN RUANG GURU (tanpa siswa) ======================= */
+// Kelompokkan guru per ruangan untuk satu daftar guru.
+function getGuruRoomGroups(guruList){
+  const byRoom = {};
+  const tanpaRuang = [];
+  guruList.forEach(g=>{
+    if(g.ruangan){ (byRoom[g.ruangan] = byRoom[g.ruangan] || []).push(g); }
+    else tanpaRuang.push(g);
+  });
+  const rooms = Object.keys(byRoom).sort((a,b)=>a.localeCompare(b,'id',{numeric:true, sensitivity:'base'}));
+  return {
+    rooms: rooms.map(r=>({room:r, list:byRoom[r]})),
+    tanpaRuang
+  };
+}
+function guruProgramSections(){
+  const pick = state.cetakGuruProg;
+  const all = [
+    {key:'tilawati', label:'Tilawati', list:state.guruList || []},
+    {key:'tahfidz',  label:'Tahfidz',  list:state.guruListTahfidz || []},
+  ];
+  return all.filter(x=> pick === 'semua' || pick === x.key);
+}
+function renderCetakGuruTab(){
+  const sections = guruProgramSections();
+  const opt = (v,l)=>`<option value="${v}" ${state.cetakGuruProg===v?'selected':''}>${l}</option>`;
+  const body = sections.map(sec=>{
+    const g = getGuruRoomGroups(sec.list);
+    const rows = g.rooms.map((x,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(x.room)}</td><td>${x.list.map((gr,gi)=>`<div>${gi+1}. ${escapeHtml(gr.nama)}${gr.kode?` <span style="color:var(--ink-muted); font-size:12px;">(${escapeHtml(gr.kode)})</span>`:''}</div>`).join('')}</td></tr>`).join('')
+      + (g.tanpaRuang.length ? `<tr><td>-</td><td>Belum ada ruangan</td><td>${g.tanpaRuang.map((gr,gi)=>`<div>${gi+1}. ${escapeHtml(gr.nama)}</div>`).join('')}</td></tr>` : '');
+    return `
+      <div style="margin-bottom:18px;">
+        <div style="font-weight:700; margin-bottom:6px; color:var(--teal-dark);">Guru ${escapeHtml(sec.label)} <span style="font-weight:400; color:var(--ink-muted);">&mdash; ${sec.list.length} guru, ${g.rooms.length} ruangan</span></div>
+        <div class="table-scroll" style="max-height:none;">
+          <table class="data-table">
+            <thead><tr><th style="width:44px;">No</th><th style="width:130px;">Ruangan</th><th>Guru</th></tr></thead>
+            <tbody>${rows || '<tr><td colspan="3"><div class="empty-state">Belum ada data guru.</div></td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }).join('');
+  return `
+    <div class="card" style="padding:20px;">
+      <div class="toolbar">
+        <select id="cetakGuruProgSelect" style="width:260px;">${opt('semua','Semua program (Tilawati & Tahfidz)')}${opt('tilawati','Guru Tilawati saja')}${opt('tahfidz','Guru Tahfidz saja')}</select>
+        <button class="btn btn-primary" id="btnCetakGuruRuang">&#128424; Cetak</button>
+      </div>
+      <div style="margin-top:14px;">${body}</div>
+    </div>`;
+}
+function buildGuruRoomPrintDocument(){
+  const tanggal = formatTanggalIndo(new Date());
+  const pages = guruProgramSections().map(sec=>{
+    const g = getGuruRoomGroups(sec.list);
+    const listHtml = (arr)=> arr.map((gr,gi)=>`<div class="g-item">${gi+1}. ${escapeHtml(gr.nama)}</div>`).join('');
+    const rows = g.rooms.map((x,i)=>`<tr><td class="c-no">${i+1}</td><td class="c-ruang">${escapeHtml(x.room)}</td><td class="c-nama">${listHtml(x.list)}</td></tr>`).join('')
+      + (g.tanpaRuang.length ? `<tr><td class="c-no">-</td><td class="c-ruang">Belum ada ruangan</td><td class="c-nama">${listHtml(g.tanpaRuang)}</td></tr>` : '');
+    return `
+    <section class="print-page">
+      <div class="edaran-head">
+        <img src="${LOGO1_DATA}" class="edaran-logo">
+        <div class="edaran-titles">
+          <div class="edaran-title">PENEMPATAN RUANG GURU ${escapeHtml(sec.label.toUpperCase())}</div>
+          <div class="edaran-sub">SD ISLAM ULUL ALBAB</div>
+        </div>
+        <img src="${LOGO2_DATA}" class="edaran-logo">
+      </div>
+      <div class="edaran-tanggal">${escapeHtml(tanggal)}</div>
+      <table class="print-table">
+        <thead><tr><th class="c-no">NO</th><th class="c-ruang">RUANGAN</th><th class="c-nama">GURU</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="3" style="text-align:center;">Belum ada data guru.</td></tr>'}</tbody>
+      </table>
+    </section>`;
+  }).join('');
+  return `<!DOCTYPE html>
+<html lang="id"><head><meta charset="UTF-8"><title>Penempatan Ruang Guru</title>
+<style>
+  @page{ size:A4; margin:16mm; }
+  *{box-sizing:border-box;}
+  body{ font-family:'Cambria','Georgia',serif; color:#000; margin:0; }
+  .print-page{ page-break-after:always; }
+  .print-page:last-child{ page-break-after:auto; }
+  .edaran-head{ display:flex; align-items:center; justify-content:center; gap:16px; }
+  .edaran-logo{ width:52px; height:52px; object-fit:contain; }
+  .edaran-titles{ flex:1; text-align:center; }
+  .edaran-title{ font-size:20px; font-weight:bold; text-align:center; line-height:1.3; }
+  .edaran-sub{ font-size:13px; text-align:center; }
+  .edaran-tanggal{ font-size:12px; text-align:right; padding-bottom:6px; margin-bottom:12px; border-bottom:1px solid #000; }
+  .print-table{ width:100%; border-collapse:collapse; font-size:13px; }
+  .print-table th, .print-table td{ border:1px solid #000; padding:6px 9px; vertical-align:top; }
+  .print-table th{ font-weight:bold; text-align:center; }
+  .c-no{ width:44px; text-align:center; }
+  .c-ruang{ width:130px; text-align:center; font-weight:bold; }
+  .c-nama{ text-align:left; }
+  .g-item{ line-height:1.55; }
+  .print-table tr{ page-break-inside:avoid; }
+</style></head>
+<body>${pages || '<p style="padding:30px;">Belum ada data guru.</p>'}</body></html>`;
+}
+
 function doPrint(mode){
   let iframe = document.getElementById('printFrame');
   if(!iframe){
@@ -3149,6 +3267,7 @@ function doPrint(mode){
   doc.open();
   if(mode === 'arsip') doc.write(buildArsipPrintDocument());
   else if(mode === 'kelas') doc.write(buildKelasPrintDocument(state.cetakKelas));
+  else if(mode === 'guru') doc.write(buildGuruRoomPrintDocument());
   else doc.write(buildPrintDocument(mode));
   doc.close();
   iframe.onload = function(){
@@ -3312,10 +3431,12 @@ async function doExcelExport(){
     ws.getRow(2).height = 26;
 
     ws.mergeCells('A3:C4');
-    ws.getCell('A3').value = `Guru: ${r.guru || '-'}`;
+    const guruNames = getGuruNamesForRoom(r.room);
+    ws.getCell('A3').value = 'Guru:' + (guruNames.length ? guruNames.map((n,gi)=>`\n${gi+1}. ${n}`).join('') : ' -');
     styleGuruCell(ws.getCell('A3'));
-    ws.getRow(3).height = 20.5;
-    ws.getRow(4).height = 20.5;
+    const guruRowH = Math.max(20.5, ((guruNames.length + 1) * 15 + 6) / 2);
+    ws.getRow(3).height = guruRowH;
+    ws.getRow(4).height = guruRowH;
 
     ws.mergeCells('A5:C5');
     ws.getCell('A5').value = tanggal;
@@ -3934,6 +4055,10 @@ function bindCetakEvents(){
   if(kelasSelect){
     kelasSelect.addEventListener('change', (e)=>{ state.cetakKelas = e.target.value; render(); });
   }
+  const guruProgSel = document.getElementById('cetakGuruProgSelect');
+  if(guruProgSel) guruProgSel.addEventListener('change', (e)=>{ state.cetakGuruProg = e.target.value; render(); });
+  const btnCetakGuruRuang = document.getElementById('btnCetakGuruRuang');
+  if(btnCetakGuruRuang) btnCetakGuruRuang.addEventListener('click', ()=>doPrint('guru'));
   const btnCetakKelas = document.getElementById('btnCetakKelas');
   if(btnCetakKelas) btnCetakKelas.addEventListener('click', ()=>doPrint('kelas'));
 }
@@ -4018,8 +4143,8 @@ async function setAdminProgram(p){
 
 // Aksi klik pada sub-daftar sidebar.
 async function applyNavSub(key){
-  if(key === 'cetak:kelas'){
-    state.cetakMode = 'kelas';
+  if(key === 'cetak:kelas' || key === 'cetak:guru'){
+    state.cetakMode = key.split(':')[1];
     render();
     return;
   }
