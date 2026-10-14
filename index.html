@@ -1105,13 +1105,19 @@ if(hasFirebaseApi() && typeof firebase !== 'undefined'){
 // membuat akun di Authentication (lihat panduan) - aplikasi tidak pernah
 // menulis ke collection users/ sendiri, supaya tidak ada yang bisa
 // menaikkan role dirinya sendiri jadi admin dari browser.
+let lastProfileProblem = '';   // alasan terakhir profil gagal didapat (untuk pesan login yang jelas)
 async function fetchUserProfile(uid){
+  lastProfileProblem = '';
   if(!firestoreDb) return null;
   try{
     const doc = await firestoreDb.collection('users').doc(uid).get();
-    return doc.exists ? doc.data() : null;
+    if(!doc.exists){ lastProfileProblem = 'Dokumen users/' + uid + ' tidak ditemukan. Pastikan Document ID sama persis dengan UID ini.'; return null; }
+    return doc.data();
   }catch(e){
     console.error('Gagal mengambil profil user', e);
+    lastProfileProblem = (e && e.code === 'permission-denied')
+      ? 'Firestore Rules menolak membaca koleksi users (perlu aturan untuk koleksi users).'
+      : 'Gagal membaca profil: ' + ((e && (e.code || e.message)) || 'tidak diketahui') + '.';
     return null;
   }
 }
@@ -5099,7 +5105,8 @@ async function handleLogin(e){
       const cred = await firebaseAuth.signInWithEmailAndPassword(emailOrUsername, password);
       const profile = await fetchUserProfile(cred.user.uid);
       if(!profile || (profile.role !== 'admin' && profile.role !== 'penguji')){
-        errBox.textContent = 'Akun ini belum diberi role di Firestore (collection users/). Hubungi admin sekolah.';
+        const why = lastProfileProblem || (profile ? ('Isi field role adalah "' + profile.role + '"; harus persis admin atau penguji.') : '');
+        errBox.textContent = 'Akun ini belum diberi role di Firestore (collection users/). ' + why + ' [UID akun: ' + cred.user.uid + '] Hubungi admin sekolah.';
         await firebaseAuth.signOut();
         if(submitBtn) submitBtn.disabled = false;
         return;
