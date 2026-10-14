@@ -197,6 +197,13 @@
   .pb-result .pb-room{flex-shrink:0; font-weight:700; color:var(--teal-dark); background:var(--teal-soft); border-radius:999px; padding:4px 12px; font-size:12.5px;}
   .pb-result .pb-room.none{color:#B45309; background:#FFF3D6;}
   .pb-empty{padding:14px; color:var(--ink-muted); font-size:13px;}
+  .pb-hit{background:#FFE98A; border-radius:3px; padding:0 1px;}
+  .pb-chips{display:flex; flex-wrap:wrap; gap:8px; margin:0 0 12px;}
+  .pb-chip{display:inline-flex; align-items:center; gap:6px; padding:5px 11px; border-radius:999px; font-size:12px; font-weight:600; background:var(--teal-soft); color:var(--teal-dark); border:1px solid var(--border);}
+  .pb-chip.full{background:#FBEBE7; color:#C0594A; border-color:#F2CFC8;}
+  .pb-chip.near{background:#FFF3D6; color:#B45309; border-color:#F5E2B0;}
+  .pb-summary{font-size:13px; margin:0 0 12px; padding:10px 14px; border-radius:10px; background:var(--teal-soft); color:var(--ink);}
+  .pb-summary.none{background:#FFF3D6;}
   .room-card.flash{animation:roomFlash 1.8s ease 1;}
   @keyframes roomFlash{0%,100%{box-shadow:var(--shadow);} 20%,60%{box-shadow:0 0 0 4px rgba(74,144,217,.55), var(--shadow);}}
   @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
@@ -2115,65 +2122,71 @@ function refreshGuruTable(){
 }
 
 /* ======================= PEMBAGIAN RUANGAN ======================= */
-// Cari siswa di SEMUA tingkatan program aktif -> tampilkan tingkatan, ruang, dan guru.
-function findSiswaRoomInfo(q){
-  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-  if(!words.length) return [];
-  const map = {};
-  activeLevels().forEach(l=>{
-    const r = assignRooms(l.label);
-    r.rooms.forEach(b=>b.students.forEach(st=>{ map[st.id] = {level:l.label, room:b.room, guru:b.guru}; }));
-    r.leftover.forEach(st=>{ map[st.id] = {level:l.label, room:null, guru:''}; });
-  });
-  const levelField = siswaLevelField();
-  return state.siswaList
-    .filter(st=>{ const n = (st.nama||'').toLowerCase(); return words.every(w=>n.includes(w)); })
-    .map(st=>({s:st, info:map[st.id] || null, level:st[levelField] || ''}));
+// Pencarian Pembagian Ruangan: HANYA di tingkatan yang sedang dibuka (mis. Tilawati 2),
+// supaya admin bisa mengecek isi ruang tingkatan itu dan memastikan ruangnya tidak penuh.
+function pbWords(){ return (state.pembagianSearch || '').toLowerCase().split(/\s+/).filter(Boolean); }
+function pbMatches(s, words){
+  if(!words.length) return true;
+  const n = (s.nama || '').toLowerCase();
+  return words.every(w=>n.includes(w));
 }
-function renderPembagianSearchResults(){
-  const q = (state.pembagianSearch||'').trim();
-  if(!q) return '';
-  const res = findSiswaRoomInfo(q);
-  if(!res.length) return `<div class="pb-results"><div class="pb-empty">Tidak ada siswa dengan nama "${escapeHtml(q)}".</div></div>`;
-  const shown = res.slice(0, 30);
-  const rows = shown.map(r=>{
-    const perm = isRoomPermanent(r.s) ? ' <span class="lock-badge" title="Ruang permanen">&#128274;</span>' : '';
-    if(r.info && r.info.room){
-      return `<div class="pb-result" data-level="${escapeAttr(r.info.level)}" data-room="${escapeAttr(r.info.room)}" data-pbgo="1">
-        <div><div class="pb-name">${escapeHtml(r.s.nama)}${perm}</div><div class="pb-meta">Kelas ${escapeHtml(r.s.kelas||'-')} &middot; ${escapeHtml(r.info.level)}${r.info.guru ? ' &middot; Guru: ' + escapeHtml(r.info.guru) : ''}</div></div>
-        <div class="pb-room">Ruang ${escapeHtml(r.info.room)}</div></div>`;
-    }
-    const why = r.level ? `Belum tertampung di ${escapeHtml(r.level)} (ruangan penuh / belum ada guru)` : `Belum punya tingkatan ${programLabel()}`;
-    return `<div class="pb-result" style="cursor:default;"><div><div class="pb-name">${escapeHtml(r.s.nama)}</div><div class="pb-meta">Kelas ${escapeHtml(r.s.kelas||'-')} &middot; ${why}</div></div><div class="pb-room none">Belum ada ruang</div></div>`;
-  }).join('');
-  const more = res.length > shown.length ? `<div class="pb-empty">Menampilkan ${shown.length} dari ${res.length} hasil. Ketik nama lebih lengkap untuk mempersempit.</div>` : '';
-  return `<div class="pb-results">${rows}${more}</div>`;
+function pbHighlight(name, words){
+  const raw = String(name == null ? '' : name);
+  if(!words.length) return escapeHtml(raw);
+  const low = raw.toLowerCase();
+  const mark = new Array(raw.length).fill(false);
+  words.forEach(w=>{ let p = low.indexOf(w); while(p !== -1){ for(let k = p; k < p + w.length; k++) mark[k] = true; p = low.indexOf(w, p + w.length); } });
+  let out = '', buf = '', cur = false;
+  for(let k = 0; k < raw.length; k++){
+    if(mark[k] !== cur){ out += cur ? `<span class="pb-hit">${escapeHtml(buf)}</span>` : escapeHtml(buf); buf = ''; cur = mark[k]; }
+    buf += raw[k];
+  }
+  out += cur ? `<span class="pb-hit">${escapeHtml(buf)}</span>` : escapeHtml(buf);
+  return out;
 }
-function bindPembagianSearchResults(){
-  document.querySelectorAll('#pbResults [data-pbgo]').forEach(el=>{
-    el.addEventListener('click', ()=>{
-      setActivePembagianLevel(el.getAttribute('data-level'));
-      state.pembagianFocusRoom = el.getAttribute('data-room');
-      render();
-    });
-  });
-}
-function renderPembagianPage(){
+function renderPembagianBody(){
   const curLevel = activePembagianLevel();
-  const tabs = activeLevels().map(l=>`
-    <div class="level-tab ${curLevel===l.label?'active':''}" data-level="${l.label}">${l.label}</div>
-  `).join('');
-
+  const levelObj = activeLevels().find(l=>l.label === curLevel);
   const {rooms, leftover} = assignRooms(curLevel);
+  const words = pbWords();
+  const searching = words.length > 0;
+  const canMove = state.role === 'admin';
 
-  const roomCards = rooms.map((r,i)=>{
-    const pct = Math.min(100, Math.round((r.students.length / r.quota) * 100));
-    const over = r.students.length >= r.quota;
-    const canMove = state.role === 'admin';
+  // Ringkasan kapasitas SEMUA ruang di tingkatan ini (selalu tampil, tidak ikut tersaring)
+  const chips = rooms.length ? `<div class="pb-chips">${rooms.map(r=>{
+    const n = r.students.length, left = r.quota - n;
+    const cls = n >= r.quota ? 'full' : (left <= 3 ? 'near' : '');
+    const note = n >= r.quota ? 'PENUH' : ('sisa ' + left);
+    return `<span class="pb-chip ${cls}" title="Ruang ${escapeAttr(r.room)}: ${n} dari ${r.quota} siswa">Ruang ${escapeHtml(r.room)} &middot; ${n}/${r.quota} &middot; ${note}</span>`;
+  }).join('')}</div>` : '';
+
+  // Hasil pencarian di tingkatan ini
+  let summary = '';
+  if(searching){
+    const hits = [];
+    rooms.forEach(r=>r.students.forEach(s=>{ if(pbMatches(s, words)) hits.push({s, room:r}); }));
+    const lo = leftover.filter(s=>pbMatches(s, words));
+    const q = escapeHtml((state.pembagianSearch||'').trim());
+    if(!hits.length && !lo.length){
+      summary = `<div class="pb-summary none">Tidak ada siswa bernama "<strong>${q}</strong>" di <strong>${escapeHtml(curLevel)}</strong>. (Pencarian hanya di tingkatan yang sedang dibuka.)</div>`;
+    }else{
+      const where = hits.slice(0, 12).map(h=>`${escapeHtml(h.s.nama)} &rarr; <strong>Ruang ${escapeHtml(h.room.room)}</strong> (${h.room.students.length}/${h.room.quota}${h.room.students.length >= h.room.quota ? ', PENUH' : ''})`).join('<br>');
+      const more = hits.length > 12 ? `<br>...dan ${hits.length - 12} lainnya.` : '';
+      const lo2 = lo.length ? `<br>${lo.map(s=>escapeHtml(s.nama)).join(', ')} &rarr; <strong>belum tertampung</strong>` : '';
+      summary = `<div class="pb-summary"><strong>${hits.length + lo.length} siswa</strong> cocok di ${escapeHtml(curLevel)}:<br>${where}${more}${lo2}</div>`;
+    }
+  }
+
+  const roomCards = rooms.map(r=>{
+    const total = r.students.length;
+    const visible = r.students.map((s,idx)=>({s, idx})).filter(x=>pbMatches(x.s, words));
+    if(searching && !visible.length) return '';          // saat mencari: tampilkan hanya ruang yang ada hasilnya
+    const pct = Math.min(100, Math.round((total / r.quota) * 100));
+    const over = total >= r.quota;
     const otherRooms = rooms.filter(x=>x.room !== r.room);
-    const studentRows = r.students.map((s,idx)=>`
+    const studentRows = visible.map(({s, idx})=>`
       <tr ${canMove ? `class="siswa-drag" draggable="true" data-sid="${escapeAttr(s.id)}"` : ''}>
-        <td style="width:44px;">${idx+1}</td><td>${isRoomPermanent(s) ? '<span class="lock-badge" title="Ruang permanen">&#128274;</span>' : ''}${escapeHtml(s.nama)}</td><td style="width:90px;">${escapeHtml(s.kelas||'')}</td>
+        <td style="width:44px;">${idx+1}</td><td>${isRoomPermanent(s) ? '<span class="lock-badge" title="Ruang permanen">&#128274;</span>' : ''}${pbHighlight(s.nama, words)}</td><td style="width:90px;">${escapeHtml(s.kelas||'')}</td>
         ${canMove ? `<td style="width:110px;"><select class="pindah-sel" data-sid="${escapeAttr(s.id)}"><option value="">Pindah...</option>${otherRooms.map(o=>`<option value="${escapeAttr(o.room)}">${escapeHtml(o.room)}</option>`).join('')}</select></td>` : ''}
       </tr>
     `).join('');
@@ -2185,12 +2198,12 @@ function renderPembagianPage(){
             <div class="room-guru">${r.guru ? 'Guru: '+escapeHtml(r.guru) : '<span style="color:#B65C4A;">Belum ada guru di ruangan ini</span>'}</div>
           </div>
           <div style="display:flex; align-items:center; gap:8px;">
-            <span class="pill ${over?'pill-rose':'pill-teal'}">${r.students.length} / ${r.quota} siswa</span>
+            <span class="pill ${over?'pill-rose':'pill-teal'}">${total} / ${r.quota} siswa${over ? ' &middot; PENUH' : ''}</span>
             <div class="capacity-bar"><div class="capacity-fill ${over?'over':''}" style="width:${pct}%"></div></div>
           </div>
         </div>
         <div class="room-card-body">
-          ${r.students.length ? `
+          ${total ? `
           <div class="table-scroll" style="max-height:260px; border:none; border-radius:0;">
             <table class="data-table">
               <thead><tr><th>No</th><th>Nama</th><th>Kelas</th>${canMove ? '<th>Pindah</th>' : ''}</tr></thead>
@@ -2207,26 +2220,36 @@ function renderPembagianPage(){
       <span>&#9888;</span>
       <div>
         <strong>${leftover.length} siswa belum tertampung</strong> karena ruangan yang tersedia untuk ${curLevel} sudah penuh.
-        Tambahkan guru/ruangan baru dengan kode <strong>${activeLevels().find(l=>l.label===curLevel).kode}</strong> di halaman Data Guru, atau naikkan kuota ruangan di Pengaturan Kuota.
+        Tambahkan guru/ruangan baru dengan kode <strong>${levelObj.kode}</strong> di halaman Data Guru, atau naikkan kuota ruangan di Pengaturan Kuota.
         <div style="margin-top:6px; font-size:12px;">${leftover.map(s=>escapeHtml(s.nama)).join(', ')}</div>
       </div>
     </div>
   ` : '';
 
-  const dragHint = (state.role === 'admin' && rooms.length > 1) ? `
+  const dragHint = (canMove && rooms.length > 1 && !searching) ? `
     <div class="banner info"><span>&#8596;</span><div>Untuk memindahkan siswa: <strong>seret nama siswa</strong> ke kotak ruangan lain, atau pilih ruangan di kolom <strong>Pindah</strong> (cocok untuk HP).</div></div>
   ` : '';
 
   return `
-    <div class="pb-search">
-      <input type="text" class="search-input" id="pbSearch" placeholder="&#128269; Cari nama siswa untuk melihat ruangannya (${programLabel()})..." value="${escapeAttr(state.pembagianSearch)}" autocomplete="off">
-      <div id="pbResults">${renderPembagianSearchResults()}</div>
-    </div>
-    <div class="level-tabs">${tabs}</div>
+    ${chips}
+    ${summary}
     ${dragHint}
-    ${!rooms.length ? `<div class="banner warn"><span>&#9888;</span><div>Belum ada ruangan/guru dengan kode <strong>${activeLevels().find(l=>l.label===curLevel).kode}</strong>. Tambahkan guru untuk tingkatan ini di halaman Data Guru.</div></div>` : ''}
+    ${!rooms.length ? `<div class="banner warn"><span>&#9888;</span><div>Belum ada ruangan/guru dengan kode <strong>${levelObj.kode}</strong>. Tambahkan guru untuk tingkatan ini di halaman Data Guru.</div></div>` : ''}
     ${leftoverBlock}
     ${roomCards}
+  `;
+}
+function renderPembagianPage(){
+  const curLevel = activePembagianLevel();
+  const tabs = activeLevels().map(l=>`
+    <div class="level-tab ${curLevel===l.label?'active':''}" data-level="${l.label}">${l.label}</div>
+  `).join('');
+  return `
+    <div class="level-tabs">${tabs}</div>
+    <div class="pb-search">
+      <input type="text" class="search-input" id="pbSearch" placeholder="&#128269; Cari nama siswa di ${escapeAttr(curLevel)}..." value="${escapeAttr(state.pembagianSearch)}" autocomplete="off">
+    </div>
+    <div id="pbBody">${renderPembagianBody()}</div>
   `;
 }
 
@@ -4064,31 +4087,10 @@ async function moveSiswaToRoom(siswaId, room){
   render();
 }
 
-function bindPembagianEvents(){
-  const pbInput = document.getElementById('pbSearch');
-  if(pbInput){
-    pbInput.addEventListener('input', ()=>{
-      state.pembagianSearch = pbInput.value;
-      document.getElementById('pbResults').innerHTML = renderPembagianSearchResults();
-      bindPembagianSearchResults();
-    });
-  }
-  bindPembagianSearchResults();
-  if(state.pembagianFocusRoom){
-    const target = state.pembagianFocusRoom; state.pembagianFocusRoom = '';
-    const card = Array.from(document.querySelectorAll('.room-card[data-room]')).find(c=>c.getAttribute('data-room') === target);
-    if(card){ card.scrollIntoView({behavior:'smooth', block:'center'}); card.classList.add('flash'); setTimeout(()=>card.classList.remove('flash'), 2000); }
-  }
-  document.querySelectorAll('.level-tab[data-level]').forEach(el=>{
-    el.addEventListener('click', ()=>{
-      setActivePembagianLevel(el.getAttribute('data-level'));
-      render();
-    });
-  });
+function bindPembagianRoomEvents(){
   if(state.role !== 'admin') return;
-
   let dragId = null;
-  document.querySelectorAll('tr.siswa-drag').forEach(tr=>{
+  document.querySelectorAll('#pbBody tr.siswa-drag').forEach(tr=>{
     tr.addEventListener('dragstart', (e)=>{
       dragId = tr.getAttribute('data-sid');
       tr.classList.add('dragging');
@@ -4100,7 +4102,7 @@ function bindPembagianEvents(){
       document.querySelectorAll('.room-card.drag-over').forEach(c=>c.classList.remove('drag-over'));
     });
   });
-  document.querySelectorAll('.room-card[data-room]').forEach(card=>{
+  document.querySelectorAll('#pbBody .room-card[data-room]').forEach(card=>{
     card.addEventListener('dragover', (e)=>{ if(dragId){ e.preventDefault(); card.classList.add('drag-over'); } });
     card.addEventListener('dragleave', (e)=>{ if(!card.contains(e.relatedTarget)) card.classList.remove('drag-over'); });
     card.addEventListener('drop', (e)=>{
@@ -4110,11 +4112,30 @@ function bindPembagianEvents(){
       if(id) moveSiswaToRoom(id, card.getAttribute('data-room'));
     });
   });
-  document.querySelectorAll('.pindah-sel').forEach(sel=>{
+  document.querySelectorAll('#pbBody .pindah-sel').forEach(sel=>{
     sel.addEventListener('change', ()=>{
       if(sel.value) moveSiswaToRoom(sel.getAttribute('data-sid'), sel.value);
     });
   });
+}
+
+function bindPembagianEvents(){
+  document.querySelectorAll('.level-tab[data-level]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      setActivePembagianLevel(el.getAttribute('data-level'));
+      render();
+    });
+  });
+  const pbInput = document.getElementById('pbSearch');
+  if(pbInput){
+    pbInput.addEventListener('input', ()=>{
+      state.pembagianSearch = pbInput.value;
+      // hanya isi ruangan yang digambar ulang, supaya kolom cari tidak kehilangan fokus
+      document.getElementById('pbBody').innerHTML = renderPembagianBody();
+      bindPembagianRoomEvents();
+    });
+  }
+  bindPembagianRoomEvents();
 }
 
 function bindKuotaEvents(){
