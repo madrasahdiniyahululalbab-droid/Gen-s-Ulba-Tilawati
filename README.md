@@ -1,2 +1,2 @@
-# Gen-s-Ulba-Tilawati
+# Gens-Ulba
 Hanya digunakan untuk Sistem Tilawati
