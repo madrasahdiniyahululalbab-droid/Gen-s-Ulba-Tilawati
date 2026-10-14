@@ -185,6 +185,20 @@
   }
   .save-dot{width:7px; height:7px; border-radius:50%; background:#3E9B5E; flex-shrink:0;}
   .save-dot.saving{background:var(--gold); animation:pulse 1s infinite;}
+  .save-dot.error{background:#C0594A;}
+  .lock-badge{display:inline-block; font-size:11px; margin-right:3px;}
+  .pb-search{margin-bottom:14px;}
+  .pb-results{margin-top:8px; background:var(--surface); border:1px solid var(--border); border-radius:12px; overflow:hidden; box-shadow:var(--shadow);}
+  .pb-result{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 14px; border-bottom:1px solid var(--border); cursor:pointer;}
+  .pb-result:last-child{border-bottom:none;}
+  .pb-result:hover{background:var(--teal-soft);}
+  .pb-result .pb-name{font-weight:600;}
+  .pb-result .pb-meta{font-size:12px; color:var(--ink-muted); margin-top:2px;}
+  .pb-result .pb-room{flex-shrink:0; font-weight:700; color:var(--teal-dark); background:var(--teal-soft); border-radius:999px; padding:4px 12px; font-size:12.5px;}
+  .pb-result .pb-room.none{color:#B45309; background:#FFF3D6;}
+  .pb-empty{padding:14px; color:var(--ink-muted); font-size:13px;}
+  .room-card.flash{animation:roomFlash 1.8s ease 1;}
+  @keyframes roomFlash{0%,100%{box-shadow:var(--shadow);} 20%,60%{box-shadow:0 0 0 4px rgba(74,144,217,.55), var(--shadow);}}
   @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
 
   /* ---------- Navbar atas: notifikasi & user chip ---------- */
@@ -909,6 +923,8 @@ const state = {
   guruSearch: '',
 
   pembagianLevel: LEVELS[0].label,
+  pembagianSearch: '',
+  pembagianFocusRoom: '',
 
   cetakLevel: LEVELS[0].label,
   cetakRoom: '__ALL__',
@@ -960,6 +976,13 @@ function siswaLevelField(){ return isTahfidz() ? 'tahfidz' : 'tilawati'; }
 function siswaRoomField(){ return isTahfidz() ? 'tahfidzAssignedRoom' : 'assignedRoom'; }
 function siswaAssignedLevelField(){ return isTahfidz() ? 'tahfidzAssignedLevel' : 'assignedLevel'; }
 function siswaRoomOverrideField(){ return isTahfidz() ? 'tahfidzRoomOverride' : 'roomOverride'; }
+// Ruang PERMANEN: siswa dikunci di ruangnya (memakai mekanisme 'pindahan manual' + penanda ini),
+// jadi saat naik tingkat lewat Uji Kenaikan ruangnya TIDAK berubah. Dipakai terutama untuk kelas 6.
+function siswaPermanenField(){ return isTahfidz() ? 'tahfidzPermanen' : 'permanen'; }
+function isRoomPermanent(s, prog){
+  const t = prog ? (prog === 'tahfidz') : isTahfidz();
+  return !!(s && s[t ? 'tahfidzPermanen' : 'permanen'] && s[t ? 'tahfidzRoomOverride' : 'roomOverride']);
+}
 function activeMateri(){ return isTahfidz() ? MATERI_TAHFIDZ : MATERI_TILAWATI; }
 function activeNextLevel(){ return isTahfidz() ? NEXT_LEVEL_TAHFIDZ : NEXT_LEVEL; }
 function activePenilaianStorageKeyPrefix(){ return isTahfidz() ? 'tahfidz-penilaian:' : 'penilaian:'; }
@@ -967,12 +990,31 @@ function activePenilaianList(){ return isTahfidz() ? state.penilaianListTahfidz 
 function activePenilaianStateKey(){ return isTahfidz() ? 'penilaianListTahfidz' : 'penilaianList'; }
 
 /* ======================= STORAGE HELPERS ======================= */
+// Pelacak kegagalan simpan: indikator TIDAK lagi bohong "Tersimpan" kalau server menolak/putus.
+let saveErrorCount = 0;
+let dataLoadFailed = false;   // true = data awal gagal dimuat -> semua penulisan diblokir agar data asli aman
+let lastSaveAlertAt = 0;
 function setSaving(isSaving){
   const dot = document.getElementById('saveDot');
   const txt = document.getElementById('saveText');
   if(!dot) return;
-  if(isSaving){ dot.classList.add('saving'); txt.textContent = 'Menyimpan...'; }
-  else { dot.classList.remove('saving'); txt.textContent = 'Tersimpan'; }
+  if(isSaving){ dot.classList.remove('error'); dot.classList.add('saving'); txt.textContent = 'Menyimpan...'; }
+  else {
+    dot.classList.remove('saving');
+    if(saveErrorCount > 0){ dot.classList.add('error'); txt.textContent = 'Gagal menyimpan'; }
+    else { dot.classList.remove('error'); txt.textContent = 'Tersimpan'; }
+  }
+}
+function reportSaveFailure(what, err){
+  saveErrorCount++;
+  console.error('Gagal menyimpan', what, err);
+  const now = Date.now();
+  if(now - lastSaveAlertAt > 60000){
+    lastSaveAlertAt = now;
+    showAlert(dataLoadFailed
+      ? 'Data awal gagal dimuat dari server, jadi perubahan DIBLOKIR agar data asli tidak tertimpa. Muat ulang halaman (tekan F5) setelah koneksi internet normal.'
+      : 'PERHATIAN: perubahan terakhir GAGAL tersimpan ke server. Periksa koneksi internet, lalu coba lagi. Kalau terus terjadi, hubungi admin (bisa jadi izin Firestore belum sesuai).');
+  }
 }
 
 /* ======================= CUSTOM MODAL (native confirm/alert are blocked in sandboxed artifacts) ======================= */
@@ -1073,7 +1115,7 @@ function hasNativeStorage(){
   return typeof window.storage !== 'undefined' && window.storage && typeof window.storage.get === 'function';
 }
 
-async function storageGet(key){
+async function storageGet(key, strict){
   try{
     if(firestoreDb){
       const doc = await firestoreDb.collection('storage').doc(key).get();
@@ -1089,12 +1131,15 @@ async function storageGet(key){
     return raw ? JSON.parse(raw) : null;
   }catch(e){
     console.error('storageGet gagal', key, e);
+    if(strict) throw e;   // pemuatan awal memakai mode ketat: gagal baca != data kosong
     return null;
   }
 }
 
 async function storageSet(key, value){
+  if(dataLoadFailed){ reportSaveFailure(key, new Error('Data awal belum berhasil dimuat')); setSaving(false); return false; }
   setSaving(true);
+  let ok = true;
   try{
     if(firestoreDb){
       await firestoreDb.collection('storage').doc(key).set({
@@ -1106,10 +1151,13 @@ async function storageSet(key, value){
     }else{
       localStorage.setItem(LS_PREFIX + key, JSON.stringify(value));
     }
+    saveErrorCount = 0;
   }catch(e){
-    console.error('Gagal menyimpan', key, e);
+    ok = false;
+    reportSaveFailure(key, e);
   }
   setSaving(false);
+  return ok;
 }
 
 const saveTimers = {};
@@ -1148,7 +1196,7 @@ async function storageList(prefix){
 }
 
 // Ambil SEMUA key+value untuk sebuah prefix dalam SATU permintaan.
-async function storageGetPrefixMap(prefix){
+async function storageGetPrefixMap(prefix, strict){
   try{
     if(firestoreDb){
       const snap = await firestoreDb.collection('storage')
@@ -1162,24 +1210,25 @@ async function storageGetPrefixMap(prefix){
       return out;
     }
     const keys = await storageList(prefix);
-    const values = await Promise.all(keys.map(k => storageGet(k)));
+    const values = await Promise.all(keys.map(k => storageGet(k, strict)));
     const out = {};
     keys.forEach((k,i)=>{ out[k] = values[i]; });
     return out;
   }catch(e){
     console.error('storageGetPrefixMap gagal', prefix, e);
+    if(strict) throw e;
     return {};
   }
 }
 
 async function loadAllData(){
   const [siswa, guru, quota, archive, guruTahfidz, quotaTahfidz] = await Promise.all([
-    storageGet('siswa-list'),
-    storageGet('guru-list'),
-    storageGet('room-quota'),
-    storageGet('siswa-archive'),
-    storageGet('tahfidz-guru-list'),
-    storageGet('tahfidz-room-quota'),
+    storageGet('siswa-list', true),
+    storageGet('guru-list', true),
+    storageGet('room-quota', true),
+    storageGet('siswa-archive', true),
+    storageGet('tahfidz-guru-list', true),
+    storageGet('tahfidz-room-quota', true),
   ]);
   state.siswaArchive = archive || [];
   state.guruListTahfidz = (guruTahfidz && guruTahfidz.length) ? guruTahfidz : [];
@@ -1217,8 +1266,8 @@ async function loadAllData(){
   // Diambil sekaligus dalam 1 permintaan (bukan satu-satu) supaya loading cepat
   // walau riwayatnya sudah ratusan catatan.
   const [penilaianMap, penilaianMapTahfidz] = await Promise.all([
-    storageGetPrefixMap('penilaian:'),
-    storageGetPrefixMap('tahfidz-penilaian:'),
+    storageGetPrefixMap('penilaian:', true),
+    storageGetPrefixMap('tahfidz-penilaian:', true),
   ]);
   state.penilaianList = Object.values(penilaianMap).filter(Boolean).sort((a,b)=> (b.ts||0) - (a.ts||0));
   state.penilaianListTahfidz = Object.values(penilaianMapTahfidz).filter(Boolean).sort((a,b)=> (b.ts||0) - (a.ts||0));
@@ -1227,7 +1276,7 @@ async function loadAllData(){
 }
 
 async function savePenilaian(record){
-  await storageSet(activePenilaianStorageKeyPrefix() + record.id, record);
+  return await storageSet(activePenilaianStorageKeyPrefix() + record.id, record);
 }
 
 async function storageDelete(key){
@@ -1240,7 +1289,7 @@ async function storageDelete(key){
       localStorage.removeItem(LS_PREFIX + key);
     }
   }catch(e){
-    console.error('Gagal menghapus', key, e);
+    reportSaveFailure(key, e);
   }
 }
 
@@ -1260,6 +1309,7 @@ async function deletePenilaian(id){
 // dipanggil ulang oleh Firestore, jadi mutateFn harus hanya bergantung pada
 // argumennya.
 async function storageTransact(key, mutateFn){
+  if(dataLoadFailed) throw new Error('Data awal belum berhasil dimuat; penulisan diblokir.');
   if(firestoreDb){
     const ref = firestoreDb.collection('storage').doc(key);
     return await firestoreDb.runTransaction(async tx=>{
@@ -1302,7 +1352,7 @@ async function updateSiswaSafely(siswaId, patchFn){
     });
     if(updated && result) state.siswaList = result;
   }catch(e){
-    console.error('updateSiswaSafely gagal', e);
+    reportSaveFailure('siswa-list', e);
     updated = null;
   }
   setSaving(false);
@@ -1327,9 +1377,9 @@ async function safeListUpdate(key, stateKey, mutateFn){
       if(key === 'siswa-list') sortSiswaListInPlace(list);
       return list;
     });
-    if(result) state[stateKey] = result;
+    if(result){ state[stateKey] = result; saveErrorCount = 0; }
   }catch(e){
-    console.error('safeListUpdate gagal', key, e);
+    reportSaveFailure(key, e);
   }
   setSaving(false);
 }
@@ -1663,11 +1713,12 @@ function updateTopbarWidgets(){
   const dot = document.getElementById('notifDot');
   if(body){
     const recent = (state.penilaianList || []).slice(0, 5);
+    const bkHtml = backupReminderHtml();
     if(recent.length === 0){
-      body.innerHTML = `<div class="notif-item" style="color:var(--ink-muted);">Belum ada aktivitas.</div>`;
-      if(dot) dot.style.display = 'none';
+      body.innerHTML = bkHtml + `<div class="notif-item" style="color:var(--ink-muted);">Belum ada aktivitas.</div>`;
+      if(dot) dot.style.display = bkHtml ? 'block' : 'none';
     }else{
-      body.innerHTML = recent.map(r=>`
+      body.innerHTML = bkHtml + recent.map(r=>`
         <div class="notif-item">
           <div class="n-title">${escapeHtml(r.siswaNama)} &mdash; ${escapeHtml(r.hasil)}</div>
           <div class="n-time">${escapeHtml(r.tingkatSaat)} &middot; ${escapeHtml(r.tanggal)}</div>
@@ -1975,7 +2026,7 @@ function refreshSiswaRow(id){
 }
 
 function escapeAttr(str){
-  return String(str||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  return String(str==null?'':str).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 /* ======================= DATA GURU ======================= */
@@ -2064,6 +2115,49 @@ function refreshGuruTable(){
 }
 
 /* ======================= PEMBAGIAN RUANGAN ======================= */
+// Cari siswa di SEMUA tingkatan program aktif -> tampilkan tingkatan, ruang, dan guru.
+function findSiswaRoomInfo(q){
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  if(!words.length) return [];
+  const map = {};
+  activeLevels().forEach(l=>{
+    const r = assignRooms(l.label);
+    r.rooms.forEach(b=>b.students.forEach(st=>{ map[st.id] = {level:l.label, room:b.room, guru:b.guru}; }));
+    r.leftover.forEach(st=>{ map[st.id] = {level:l.label, room:null, guru:''}; });
+  });
+  const levelField = siswaLevelField();
+  return state.siswaList
+    .filter(st=>{ const n = (st.nama||'').toLowerCase(); return words.every(w=>n.includes(w)); })
+    .map(st=>({s:st, info:map[st.id] || null, level:st[levelField] || ''}));
+}
+function renderPembagianSearchResults(){
+  const q = (state.pembagianSearch||'').trim();
+  if(!q) return '';
+  const res = findSiswaRoomInfo(q);
+  if(!res.length) return `<div class="pb-results"><div class="pb-empty">Tidak ada siswa dengan nama "${escapeHtml(q)}".</div></div>`;
+  const shown = res.slice(0, 30);
+  const rows = shown.map(r=>{
+    const perm = isRoomPermanent(r.s) ? ' <span class="lock-badge" title="Ruang permanen">&#128274;</span>' : '';
+    if(r.info && r.info.room){
+      return `<div class="pb-result" data-level="${escapeAttr(r.info.level)}" data-room="${escapeAttr(r.info.room)}" data-pbgo="1">
+        <div><div class="pb-name">${escapeHtml(r.s.nama)}${perm}</div><div class="pb-meta">Kelas ${escapeHtml(r.s.kelas||'-')} &middot; ${escapeHtml(r.info.level)}${r.info.guru ? ' &middot; Guru: ' + escapeHtml(r.info.guru) : ''}</div></div>
+        <div class="pb-room">Ruang ${escapeHtml(r.info.room)}</div></div>`;
+    }
+    const why = r.level ? `Belum tertampung di ${escapeHtml(r.level)} (ruangan penuh / belum ada guru)` : `Belum punya tingkatan ${programLabel()}`;
+    return `<div class="pb-result" style="cursor:default;"><div><div class="pb-name">${escapeHtml(r.s.nama)}</div><div class="pb-meta">Kelas ${escapeHtml(r.s.kelas||'-')} &middot; ${why}</div></div><div class="pb-room none">Belum ada ruang</div></div>`;
+  }).join('');
+  const more = res.length > shown.length ? `<div class="pb-empty">Menampilkan ${shown.length} dari ${res.length} hasil. Ketik nama lebih lengkap untuk mempersempit.</div>` : '';
+  return `<div class="pb-results">${rows}${more}</div>`;
+}
+function bindPembagianSearchResults(){
+  document.querySelectorAll('#pbResults [data-pbgo]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      setActivePembagianLevel(el.getAttribute('data-level'));
+      state.pembagianFocusRoom = el.getAttribute('data-room');
+      render();
+    });
+  });
+}
 function renderPembagianPage(){
   const curLevel = activePembagianLevel();
   const tabs = activeLevels().map(l=>`
@@ -2079,7 +2173,7 @@ function renderPembagianPage(){
     const otherRooms = rooms.filter(x=>x.room !== r.room);
     const studentRows = r.students.map((s,idx)=>`
       <tr ${canMove ? `class="siswa-drag" draggable="true" data-sid="${escapeAttr(s.id)}"` : ''}>
-        <td style="width:44px;">${idx+1}</td><td>${escapeHtml(s.nama)}</td><td style="width:90px;">${escapeHtml(s.kelas||'')}</td>
+        <td style="width:44px;">${idx+1}</td><td>${isRoomPermanent(s) ? '<span class="lock-badge" title="Ruang permanen">&#128274;</span>' : ''}${escapeHtml(s.nama)}</td><td style="width:90px;">${escapeHtml(s.kelas||'')}</td>
         ${canMove ? `<td style="width:110px;"><select class="pindah-sel" data-sid="${escapeAttr(s.id)}"><option value="">Pindah...</option>${otherRooms.map(o=>`<option value="${escapeAttr(o.room)}">${escapeHtml(o.room)}</option>`).join('')}</select></td>` : ''}
       </tr>
     `).join('');
@@ -2124,6 +2218,10 @@ function renderPembagianPage(){
   ` : '';
 
   return `
+    <div class="pb-search">
+      <input type="text" class="search-input" id="pbSearch" placeholder="&#128269; Cari nama siswa untuk melihat ruangannya (${programLabel()})..." value="${escapeAttr(state.pembagianSearch)}" autocomplete="off">
+      <div id="pbResults">${renderPembagianSearchResults()}</div>
+    </div>
     <div class="level-tabs">${tabs}</div>
     ${dragHint}
     ${!rooms.length ? `<div class="banner warn"><span>&#9888;</span><div>Belum ada ruangan/guru dengan kode <strong>${activeLevels().find(l=>l.label===curLevel).kode}</strong>. Tambahkan guru untuk tingkatan ini di halaman Data Guru.</div></div>` : ''}
@@ -2167,7 +2265,7 @@ function renderKuotaPage(){
 }
 
 function escapeHtml(str){
-  return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return String(str==null?'':str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 /* ======================= UJI KENAIKAN SISWA (khusus Penguji, sesuai Blanko resmi) ======================= */
@@ -2465,14 +2563,24 @@ async function submitUjiHasil(hasil){
   };
 
   setSaving(true);
-  await savePenilaian(record);
+  const savedOk = await savePenilaian(record);
+  if(!savedOk){
+    setSaving(false);
+    await showAlert('Penilaian GAGAL tersimpan ke server, jadi belum dicatat. Periksa koneksi internet lalu simpan ulang (isian Anda masih ada di layar).');
+    return;
+  }
   activePenilaianList().unshift(record);
 
   if(hasil === 'Naik' && next){
     const roomField = siswaRoomField();
     const overrideField = siswaRoomOverrideField();
     const assignedLevelField = siswaAssignedLevelField();
-    await updateSiswaSafely(siswa.id, s => { s[levelField] = next; s[overrideField] = ''; s[roomField] = ''; s[assignedLevelField] = ''; });
+    const permField = siswaPermanenField();
+    await updateSiswaSafely(siswa.id, s => {
+      s[levelField] = next;
+      // Siswa dengan ruang PERMANEN tetap di ruangnya; yang lain dicarikan ruang baru sesuai tingkatnya.
+      if(!(s[permField] && s[overrideField])){ s[overrideField] = ''; s[roomField] = ''; s[assignedLevelField] = ''; }
+    });
     await ensureAndPersistRoomAssignments();
   }
   setSaving(false);
@@ -3841,7 +3949,11 @@ function bindSiswaRowEvents(rows){
       const overrideField = siswaRoomOverrideField();
       await safeListUpdate('siswa-list', 'siswaList', list=>{
         const s = list.find(x=>x.id===id);
-        if(s){ s[levelField] = val; s[overrideField] = ''; s[roomField] = ''; s[assignedLevelField] = ''; } // level berubah, cari ruang tetap yang baru
+        if(s){
+          s[levelField] = val;
+          // level berubah -> cari ruang baru, KECUALI siswa berstatus ruang permanen
+          if(!(s[siswaPermanenField()] && s[overrideField])){ s[overrideField] = ''; s[roomField] = ''; s[assignedLevelField] = ''; }
+        }
       });
       await ensureAndPersistRoomAssignments();
       refreshSiswaRow(id); // update baris ini saja - tabel & posisi scroll tidak berubah
@@ -3852,7 +3964,8 @@ function bindSiswaRowEvents(rows){
         const val = e.target.value;
         const overrideField = siswaRoomOverrideField();
         safeListUpdate('siswa-list', 'siswaList', list=>{
-          const s = list.find(x=>x.id===id); if(s) s[overrideField] = val;
+          const s = list.find(x=>x.id===id);
+          if(s){ s[overrideField] = val; if(!val) s[siswaPermanenField()] = false; } // 'Otomatis' = lepas status permanen
         });
       });
     }
@@ -3944,14 +4057,29 @@ async function moveSiswaToRoom(siswaId, room){
     const ok = await showConfirm(`Ruang ${room} sudah penuh (${target.students.length} / ${target.quota}). Tetap pindahkan ${s.nama}?`, 'Ya, Pindahkan');
     if(!ok){ render(); return; }
   }
+  const permField = siswaPermanenField();
   await updateSiswaSafely(siswaId, x=>{
-    x[overrideField] = (room === x[roomField]) ? '' : room;
+    x[overrideField] = (room === x[roomField] && !x[permField]) ? '' : room;
   });
   render();
 }
 
 function bindPembagianEvents(){
-  document.querySelectorAll('[data-level]').forEach(el=>{
+  const pbInput = document.getElementById('pbSearch');
+  if(pbInput){
+    pbInput.addEventListener('input', ()=>{
+      state.pembagianSearch = pbInput.value;
+      document.getElementById('pbResults').innerHTML = renderPembagianSearchResults();
+      bindPembagianSearchResults();
+    });
+  }
+  bindPembagianSearchResults();
+  if(state.pembagianFocusRoom){
+    const target = state.pembagianFocusRoom; state.pembagianFocusRoom = '';
+    const card = Array.from(document.querySelectorAll('.room-card[data-room]')).find(c=>c.getAttribute('data-room') === target);
+    if(card){ card.scrollIntoView({behavior:'smooth', block:'center'}); card.classList.add('flash'); setTimeout(()=>card.classList.remove('flash'), 2000); }
+  }
+  document.querySelectorAll('.level-tab[data-level]').forEach(el=>{
     el.addEventListener('click', ()=>{
       setActivePembagianLevel(el.getAttribute('data-level'));
       render();
@@ -3998,7 +4126,8 @@ function bindKuotaEvents(){
       newQuota[room] = (val && val > 0) ? val : activeDefaultQuota();
     });
     if(isTahfidz()){ state.roomQuotaTahfidz = newQuota; } else { state.roomQuota = newQuota; }
-    storageTransact(activeRoomQuotaStorageKey(), latest=>({...(latest||{}), ...newQuota})).catch(e=>console.error('Gagal simpan kuota', e));
+    try{ await storageTransact(activeRoomQuotaStorageKey(), latest=>({...(latest||{}), ...newQuota})); saveErrorCount = 0; }
+    catch(e){ reportSaveFailure(activeRoomQuotaStorageKey(), e); render(); return; }
     render();
     await showAlert('Kuota berhasil disimpan.');
   });
@@ -4221,6 +4350,7 @@ async function collectBackup(){
 }
 async function downloadBackup(tag){
   const b = await collectBackup();
+  try{ localStorage.setItem('gens-ulba-last-dl', String(Date.now())); }catch(e){ /* abaikan */ }
   const stamp = b.createdAt.slice(0,16).replace(/[:T]/g,'-');
   downloadJson(`gens-ulba-backup${tag ? '-'+tag : ''}-${stamp}.json`, b);
   return b;
@@ -4228,6 +4358,9 @@ async function downloadBackup(tag){
 async function admRestoreFromFile(file){
   let data;
   try{ data = JSON.parse(await file.text()); }catch(e){ await showAlert('File tidak bisa dibaca. Pastikan ini file cadangan (.json) dari aplikasi ini.'); return; }
+  return admRestoreFromData(data);
+}
+async function admRestoreFromData(data){
   if(!data || data.app !== 'gens-ulba' || !data.keys || typeof data.keys !== 'object'){ await showAlert("Ini bukan file cadangan Gen's Ulba."); return; }
   const k = data.keys;
   const cnt = (key)=> Array.isArray(k[key]) ? k[key].length : 0;
@@ -4262,7 +4395,17 @@ function renderAdmBackupPage(){
         ${stat.map(x=>`<div class="card stat-card" style="background:var(--teal-soft); border:none;"><div class="stat-label">${x[0]}</div><div class="stat-value">${x[1]}</div></div>`).join('')}
       </div>
       <button class="btn btn-primary" id="admBtnBackup">&#8681; Unduh Cadangan (.json)</button>
+      <div style="font-size:12.5px; margin-top:8px; font-weight:600;">${lastDownloadLabel()}</div>
       <div style="font-size:12px; color:var(--ink-muted); margin-top:8px;">Berisi siswa, arsip, guru, kuota, dan seluruh riwayat penilaian kedua program. Simpan filenya di tempat aman.</div>
+    </div>
+    <div class="card" style="padding:20px; margin-bottom:16px;">
+      <h2 class="section-title">Titik Pulih Otomatis (di Firebase)</h2>
+      <div class="banner info"><span>&#8505;</span><div>Setiap hari, saat Administrator pertama kali masuk, aplikasi menyimpan salinan seluruh data secara otomatis dan menyimpan <strong>${SNAP_KEEP} salinan terakhir</strong>. Cocok untuk menyelamatkan data yang salah hapus atau salah edit. Salinan ini masih berada di akun Firebase yang sama, jadi <strong>tetap unduh file cadangan (.json)</strong> secara berkala dan simpan di tempat lain.</div></div>
+      <div class="toolbar" style="margin-bottom:10px;">
+        <button class="btn btn-primary btn-sm" id="admSnapNow">&#43; Buat titik pulih sekarang</button>
+        <span id="admSnapStatus" style="font-size:12.5px; color:var(--ink-muted);"></span>
+      </div>
+      <div id="admSnapList"><div style="color:var(--ink-muted); font-size:13px;">Memuat daftar titik pulih...</div></div>
     </div>
     <div class="card" style="padding:20px;">
       <h2 class="section-title">Pulihkan dari Cadangan</h2>
@@ -4273,13 +4416,125 @@ function renderAdmBackupPage(){
     </div>`;
 }
 function bindAdmBackupEvents(){
-  document.getElementById('admBtnBackup').addEventListener('click', async ()=>{ await downloadBackup(''); await showAlert('Cadangan diunduh.'); });
+  document.getElementById('admBtnBackup').addEventListener('click', async ()=>{ await downloadBackup(''); await showAlert('Cadangan diunduh. Simpan filenya di tempat aman (Google Drive / flashdisk).'); render(); });
   const f = document.getElementById('admRestoreFile');
   f.addEventListener('change', async ()=>{ const file = f.files[0]; if(file) await admRestoreFromFile(file); f.value = ''; });
+  document.getElementById('admSnapNow').addEventListener('click', async ()=>{
+    const st = document.getElementById('admSnapStatus');
+    if(!firestoreDb){ await showAlert('Titik pulih otomatis hanya tersedia saat aplikasi memakai Firebase.'); return; }
+    st.textContent = 'Menyimpan...';
+    try{ await createSnapshot(snapId(true)); await pruneSnapshots(); st.textContent = 'Titik pulih dibuat.'; }
+    catch(e){ st.textContent = ''; await showAlert('Gagal membuat titik pulih: ' + snapErrText(e)); }
+    refreshSnapshotList();
+  });
+  refreshSnapshotList();
+}
+
+/* ---- Titik pulih otomatis (salinan harian di Firestore, koleksi 'backups') ---- */
+const SNAP_KEEP = 14;
+function pad2(n){ return String(n).padStart(2,'0'); }
+function snapId(withTime){
+  const d = new Date();
+  const day = d.getFullYear() + '-' + pad2(d.getMonth()+1) + '-' + pad2(d.getDate());
+  return withTime ? day + '_' + pad2(d.getHours()) + pad2(d.getMinutes()) + pad2(d.getSeconds()) : day;
+}
+function snapErrText(e){
+  const code = e && e.code ? e.code : '';
+  if(code === 'permission-denied') return 'izin Firestore untuk koleksi "backups" belum diberikan (lihat panduan PDF, bagian Firestore Rules).';
+  return (e && e.message) ? e.message : String(e);
+}
+async function createSnapshot(id){
+  if(!firestoreDb) throw new Error('Firebase tidak aktif.');
+  const b = await collectBackup();
+  const json = JSON.stringify(b);
+  const CH = 250000, parts = [];
+  for(let i = 0; i < json.length; i += CH) parts.push(json.slice(i, i + CH));
+  const ref = firestoreDb.collection('backups').doc(id);
+  for(let i = 0; i < parts.length; i++) await ref.collection('parts').doc(String(i)).set({i, data: parts[i]});
+  const pen = Object.keys(b.keys).filter(k=>k.indexOf('penilaian:') === 0 || k.indexOf('tahfidz-penilaian:') === 0).length;
+  // dokumen induk ditulis TERAKHIR = tanda bahwa salinan lengkap & valid
+  await ref.set({createdAt: firebase.firestore.FieldValue.serverTimestamp(), createdIso: b.createdAt, chunks: parts.length,
+                 siswa: (b.keys['siswa-list'] || []).length, penilaian: pen});
+  return id;
+}
+async function listSnapshots(){
+  const snap = await firestoreDb.collection('backups').get();
+  return snap.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=> a.id < b.id ? 1 : -1);
+}
+async function pruneSnapshots(){
+  const list = await listSnapshots();
+  for(const old of list.slice(SNAP_KEEP)){
+    const ref = firestoreDb.collection('backups').doc(old.id);
+    const parts = await ref.collection('parts').get();
+    for(const p of parts.docs) await p.ref.delete();
+    await ref.delete();
+  }
+}
+async function loadSnapshotData(id){
+  const ref = firestoreDb.collection('backups').doc(id);
+  const head = await ref.get();
+  if(!head.exists) throw new Error('Titik pulih tidak ditemukan.');
+  const n = head.data().chunks || 0;
+  let json = '';
+  for(let i = 0; i < n; i++){
+    const p = await ref.collection('parts').doc(String(i)).get();
+    if(!p.exists) throw new Error('Titik pulih rusak (bagian ' + i + ' hilang).');
+    json += p.data().data;
+  }
+  return JSON.parse(json);
+}
+async function autoDailySnapshot(){
+  if(!firestoreDb || dataLoadFailed || state.role !== 'admin') return;
+  try{
+    const list = await listSnapshots();
+    if(!list.some(x=>x.id.indexOf(snapId(false)) === 0)){
+      await createSnapshot(snapId(false));
+      await pruneSnapshots();
+    }
+  }catch(e){
+    console.warn('Titik pulih otomatis tidak berjalan:', snapErrText(e));   // sengaja tidak mengganggu pengguna
+  }
+}
+async function refreshSnapshotList(){
+  const box = document.getElementById('admSnapList');
+  if(!box) return;
+  if(!firestoreDb){ box.innerHTML = '<div style="color:var(--ink-muted); font-size:13px;">Mode lokal: titik pulih otomatis hanya tersedia dengan Firebase.</div>'; return; }
+  try{
+    const list = await listSnapshots();
+    if(!document.getElementById('admSnapList')) return;
+    if(!list.length){ box.innerHTML = '<div style="color:var(--ink-muted); font-size:13px;">Belum ada titik pulih. Akan dibuat otomatis, atau klik tombol di atas.</div>'; return; }
+    box.innerHTML = `<div class="table-scroll"><table class="data-table"><thead><tr><th>Titik pulih</th><th>Siswa</th><th>Penilaian</th><th></th></tr></thead><tbody>` +
+      list.map(x=>`<tr><td>${escapeHtml(x.id.replace('_',' pukul ').replace(/ pukul (\d\d)(\d\d)(\d\d)$/,' pukul $1:$2'))}</td><td>${x.siswa ?? '-'}</td><td>${x.penilaian ?? '-'}</td>
+        <td style="white-space:nowrap;"><button class="btn btn-outline btn-sm" data-snap-dl="${escapeAttr(x.id)}">&#8681; Unduh</button> <button class="btn btn-danger btn-sm" data-snap-restore="${escapeAttr(x.id)}">Pulihkan</button></td></tr>`).join('') +
+      `</tbody></table></div>`;
+    box.querySelectorAll('[data-snap-dl]').forEach(b=>b.addEventListener('click', async ()=>{
+      try{ const d = await loadSnapshotData(b.getAttribute('data-snap-dl')); downloadJson('gens-ulba-titik-pulih-' + b.getAttribute('data-snap-dl') + '.json', d); }
+      catch(e){ await showAlert('Gagal mengunduh: ' + snapErrText(e)); }
+    }));
+    box.querySelectorAll('[data-snap-restore]').forEach(b=>b.addEventListener('click', async ()=>{
+      try{ const d = await loadSnapshotData(b.getAttribute('data-snap-restore')); await admRestoreFromData(d); }
+      catch(e){ await showAlert('Gagal memulihkan: ' + snapErrText(e)); }
+    }));
+  }catch(e){
+    box.innerHTML = '<div class="banner warn"><span>&#9888;</span><div>Titik pulih otomatis belum aktif: ' + escapeHtml(snapErrText(e)) + '</div></div>';
+  }
+}
+function lastDownloadLabel(){
+  let t = 0; try{ t = parseInt(localStorage.getItem('gens-ulba-last-dl') || '0', 10) || 0; }catch(e){}
+  if(!t) return 'Belum pernah mengunduh cadangan di perangkat ini.';
+  const days = Math.floor((Date.now() - t) / 86400000);
+  return 'Terakhir unduh cadangan di perangkat ini: ' + (days <= 0 ? 'hari ini' : days + ' hari lalu') + '.';
+}
+function backupReminderHtml(){
+  if(state.role !== 'admin') return '';
+  let t = 0; try{ t = parseInt(localStorage.getItem('gens-ulba-last-dl') || '0', 10) || 0; }catch(e){}
+  const days = t ? Math.floor((Date.now() - t) / 86400000) : 999;
+  if(days < 7) return '';
+  return `<div class="notif-item"><div class="n-title">&#128190; Waktunya unduh cadangan</div><div class="n-time">${t ? days + ' hari belum mengunduh cadangan (.json)' : 'Belum pernah mengunduh cadangan di perangkat ini'}. Buka menu Backup &amp; Pemulihan.</div></div>`;
 }
 
 /* ---- Data Siswa gabungan + edit massal ---- */
-const admSiswa = {q:'', kelas:'', tl:'', th:'', page:1, sel:new Set()};
+const admSiswa = {q:'', kelas:'', tl:'', th:'', perm:'', page:1, sel:new Set()};
 const ADM_PAGE = 50;
 function admFiltered(){
   const q = admSiswa.q.trim().toLowerCase();
@@ -4287,7 +4542,8 @@ function admFiltered(){
   return state.siswaList.filter(s=>
     (!q || (s.nama||'').toLowerCase().includes(q)) &&
     (!admSiswa.kelas || (s.kelas||'') === admSiswa.kelas) &&
-    byLevel(admSiswa.tl, s.tilawati) && byLevel(admSiswa.th, s.tahfidz));
+    byLevel(admSiswa.tl, s.tilawati) && byLevel(admSiswa.th, s.tahfidz) &&
+    (!admSiswa.perm || (admSiswa.perm === 'ya' ? (isRoomPermanent(s,'tilawati') || isRoomPermanent(s,'tahfidz')) : !(isRoomPermanent(s,'tilawati') || isRoomPermanent(s,'tahfidz')))));
 }
 function renderAdmSiswaPage(){
   const kelasList = [...new Set(state.siswaList.map(s=>s.kelas||'').filter(Boolean))].sort((a,b)=>a.localeCompare(b,'id',{numeric:true}));
@@ -4299,8 +4555,9 @@ function renderAdmSiswaPage(){
         <select id="admKelas" style="width:120px;"><option value="">Semua kelas</option>${kelasList.map(k=>`<option value="${escapeAttr(k)}" ${admSiswa.kelas===k?'selected':''}>${escapeHtml(k)}</option>`).join('')}</select>
         <select id="admTl" style="width:150px;" title="Filter Tilawati">${opt(LEVEL_LABELS, admSiswa.tl, 'Tilawati')}</select>
         <select id="admTh" style="width:150px;" title="Filter Tahfidz">${opt(LEVEL_LABELS_TAHFIDZ, admSiswa.th, 'Tahfidz')}</select>
+        <select id="admPerm" style="width:160px;" title="Filter ruang permanen"><option value="">Semua status ruang</option><option value="ya" ${admSiswa.perm==='ya'?'selected':''}>&#128274; Permanen saja</option><option value="tidak" ${admSiswa.perm==='tidak'?'selected':''}>Bukan permanen</option></select>
       </div>
-      <div style="font-size:11.5px; color:var(--ink-muted); margin:6px 0 10px;">Filter berurutan: kelas, level Tilawati, level Tahfidz. Centang siswa lalu pakai tombol di bawah untuk mengubah sekaligus.</div>
+      <div style="font-size:11.5px; color:var(--ink-muted); margin:6px 0 10px;">Filter berurutan: kelas, level Tilawati, level Tahfidz, status permanen. Centang siswa lalu pakai tombol di bawah untuk mengubah sekaligus. Tanda &#128274; = ruang permanen (tidak berpindah saat naik tingkat).</div>
       <div id="admSiswaBody"></div>
     </div>`;
 }
@@ -4318,8 +4575,8 @@ function refreshAdmSiswa(resetScroll){
   const rows = items.map(s=>`<tr>
       <td><input type="checkbox" class="admChk" data-id="${escapeAttr(s.id)}" ${admSiswa.sel.has(s.id)?'checked':''}></td>
       <td>${escapeHtml(s.nama)}</td><td>${escapeHtml(s.kelas||'-')}</td>
-      <td>${escapeHtml(s.tilawati||'-')}</td><td>${escapeHtml(s.roomOverride||s.assignedRoom||'-')}</td>
-      <td>${escapeHtml(s.tahfidz||'-')}</td><td>${escapeHtml(s.tahfidzRoomOverride||s.tahfidzAssignedRoom||'-')}</td></tr>`).join('');
+      <td>${escapeHtml(s.tilawati||'-')}</td><td>${isRoomPermanent(s,'tilawati') ? '<span class="lock-badge" title="Ruang permanen">&#128274;</span>' : ''}${escapeHtml(s.roomOverride||s.assignedRoom||'-')}</td>
+      <td>${escapeHtml(s.tahfidz||'-')}</td><td>${isRoomPermanent(s,'tahfidz') ? '<span class="lock-badge" title="Ruang permanen">&#128274;</span>' : ''}${escapeHtml(s.tahfidzRoomOverride||s.tahfidzAssignedRoom||'-')}</td></tr>`).join('');
   const dis = n ? '' : 'disabled';
   const roomOpts = (prog)=> '<option value="">— pilih ruang —</option><option value="__AUTO__">Otomatis (pembagian sistem)</option>'
     + admRoomsOf(prog).map(r=>`<option value="${escapeAttr(r)}">${escapeHtml(r)}</option>`).join('');
@@ -4348,6 +4605,12 @@ function refreshAdmSiswa(resetScroll){
       <button class="btn btn-outline btn-sm" id="admApplyRoomTh" ${dis}>Terapkan Ruang Tahfidz</button>
       <button class="btn btn-danger btn-sm" id="admDelSel" ${dis}>&#128465; Hapus terpilih</button>
     </div>
+    <div class="toolbar" style="margin-bottom:12px;">
+      <button class="btn btn-outline btn-sm" id="admPermTl" ${dis} title="Siswa tetap di ruangnya saat naik tingkat">&#128274; Permanenkan Ruang Tilawati</button>
+      <button class="btn btn-outline btn-sm" id="admUnpermTl" ${dis}>&#128275; Lepas Permanen Tilawati</button>
+      <button class="btn btn-outline btn-sm" id="admPermTh" ${dis} title="Siswa tetap di ruangnya saat naik tingkat">&#128274; Permanenkan Ruang Tahfidz</button>
+      <button class="btn btn-outline btn-sm" id="admUnpermTh" ${dis}>&#128275; Lepas Permanen Tahfidz</button>
+    </div>
     <div class="table-scroll"><table class="data-table">
       <thead><tr><th style="width:36px;"></th><th>Nama</th><th>Kelas</th><th>Tilawati</th><th>Ruang Tilawati</th><th>Tahfidz</th><th>Ruang Tahfidz</th></tr></thead>
       <tbody>${rows || '<tr><td colspan="7"><div class="empty-state">Tidak ada siswa yang cocok.</div></td></tr>'}</tbody>
@@ -4368,7 +4631,7 @@ function refreshAdmSiswa(resetScroll){
     const hiddenCnt = Array.from(admSiswa.sel).filter(id=>!visibleIds.has(id)).length;
     const hid = document.getElementById('admSelHidden');
     if(hid) hid.textContent = hiddenCnt ? `(${hiddenCnt} terpilih sedang tidak tampil karena filter)` : '';
-    ['admApplyKelas','admApplyTl','admApplyTh','admApplyRoomTl','admApplyRoomTh','admDelSel','admClearSel'].forEach(bid=>{
+    ['admApplyKelas','admApplyTl','admApplyTh','admApplyRoomTl','admApplyRoomTh','admDelSel','admClearSel','admPermTl','admUnpermTl','admPermTh','admUnpermTh'].forEach(bid=>{
       const b = document.getElementById(bid); if(b) b.disabled = !cnt;
     });
     const all = document.getElementById('admSelAll');
@@ -4401,11 +4664,15 @@ function refreshAdmSiswa(resetScroll){
   document.getElementById('admApplyRoomTl').addEventListener('click', ()=>admBulkRoom('tilawati', document.getElementById('admBulkRoomTl').value));
   document.getElementById('admApplyRoomTh').addEventListener('click', ()=>admBulkRoom('tahfidz', document.getElementById('admBulkRoomTh').value));
   document.getElementById('admDelSel').addEventListener('click', admDeleteSelected);
+  document.getElementById('admPermTl').addEventListener('click', ()=>admBulkPermanen('tilawati', true));
+  document.getElementById('admUnpermTl').addEventListener('click', ()=>admBulkPermanen('tilawati', false));
+  document.getElementById('admPermTh').addEventListener('click', ()=>admBulkPermanen('tahfidz', true));
+  document.getElementById('admUnpermTh').addEventListener('click', ()=>admBulkPermanen('tahfidz', false));
 }
 /* ---- Penempatan ruang massal (Tilawati & Tahfidz) ---- */
 const ADM_ROOM_CFG = {
-  tilawati:{label:'Tilawati', levelField:'tilawati', overrideField:'roomOverride',        roomField:'assignedRoom',        guruKey:'guruList',       quotaKey:'roomQuota',        defQuota:()=>DEFAULT_QUOTA},
-  tahfidz: {label:'Tahfidz',  levelField:'tahfidz',  overrideField:'tahfidzRoomOverride', roomField:'tahfidzAssignedRoom', guruKey:'guruListTahfidz', quotaKey:'roomQuotaTahfidz', defQuota:()=>DEFAULT_QUOTA_TAHFIDZ},
+  tilawati:{label:'Tilawati', levelField:'tilawati', overrideField:'roomOverride', permField:'permanen',        roomField:'assignedRoom',        guruKey:'guruList',       quotaKey:'roomQuota',        defQuota:()=>DEFAULT_QUOTA},
+  tahfidz: {label:'Tahfidz',  levelField:'tahfidz',  overrideField:'tahfidzRoomOverride', permField:'tahfidzPermanen', roomField:'tahfidzAssignedRoom', guruKey:'guruListTahfidz', quotaKey:'roomQuotaTahfidz', defQuota:()=>DEFAULT_QUOTA_TAHFIDZ},
 };
 // Semua ruang yang ada (dari data guru) untuk satu program, tanpa peduli program yang sedang aktif.
 function admRoomsOf(prog){
@@ -4437,7 +4704,8 @@ async function admBulkRoom(prog, val){
   const more = eligible.length > 6 ? ` dan ${eligible.length - 6} siswa lainnya` : '';
   let msg;
   if(auto){
-    msg = `Kembalikan ${eligible.length} siswa ke pembagian ruang OTOMATIS (${cfg.label})?`;
+    const nPerm = eligible.filter(x=>x[cfg.permField] && x[cfg.overrideField]).length;
+    msg = `Kembalikan ${eligible.length} siswa ke pembagian ruang OTOMATIS (${cfg.label})?` + (nPerm ? `\n\n${nPerm} di antaranya berstatus PERMANEN; status permanennya ikut dilepas.` : '');
   }else{
     const now = state.siswaList.filter(x=>x[cfg.levelField] && !eligIds.has(x.id) && (x[cfg.overrideField] || x[cfg.roomField]) === val).length;
     const after = now + eligible.length, quota = admRoomQuotaOf(prog, val);
@@ -4448,7 +4716,47 @@ async function admBulkRoom(prog, val){
   const ok = await showConfirm(msg, 'Ya, Terapkan');
   if(!ok) return;
   await safeListUpdate('siswa-list', 'siswaList', list=>{
-    list.forEach(x=>{ if(eligIds.has(x.id)) x[cfg.overrideField] = auto ? '' : val; });
+    list.forEach(x=>{
+      if(!eligIds.has(x.id)) return;
+      if(auto){ x[cfg.overrideField] = ''; x[cfg.permField] = false; }   // otomatis = lepas permanen juga
+      else x[cfg.overrideField] = val;
+    });
+  });
+  await ensureRoomsBothPrograms();
+  admSiswa.sel.clear();
+  render();
+}
+async function admBulkPermanen(prog, on){
+  const ids = new Set(admSiswa.sel);
+  if(!ids.size) return;
+  const cfg = ADM_ROOM_CFG[prog];
+  const picked = state.siswaList.filter(x=>ids.has(x.id));
+  const roomOf = x => x[cfg.overrideField] || x[cfg.roomField] || '';
+  const eligible = on ? picked.filter(x=>x[cfg.levelField] && roomOf(x)) : picked.filter(x=>x[cfg.permField]);
+  const skipped = picked.length - eligible.length;
+  if(!eligible.length){
+    await showAlert(on ? `Siswa terpilih belum punya ruang ${cfg.label}, jadi belum bisa dipermanenkan. Tempatkan di ruang dulu.` : `Tidak ada siswa terpilih yang berstatus permanen (${cfg.label}).`);
+    return;
+  }
+  const shown = eligible.slice(0,6).map(x=>x.nama).join(', ');
+  const more = eligible.length > 6 ? ` dan ${eligible.length - 6} siswa lainnya` : '';
+  const msg = (on
+    ? `Jadikan ruang ${cfg.label} PERMANEN untuk ${eligible.length} siswa?\n\nSetelah ini, saat mereka naik tingkat lewat Uji Kenaikan, ruangnya TIDAK berpindah.`
+    : `Lepas status permanen ruang ${cfg.label} untuk ${eligible.length} siswa?\n\nRuang mereka saat ini tidak berubah, tetapi akan dicarikan ruang baru saat naik tingkat.`)
+    + `\n\nSiswa: ${shown}${more}.` + (skipped ? `\n${skipped} siswa terpilih dilewati (${on ? 'belum punya ruang' : 'memang bukan permanen'}).` : '');
+  const ok = await showConfirm(msg, on ? 'Ya, Permanenkan' : 'Ya, Lepas');
+  if(!ok) return;
+  const eligIds = new Set(eligible.map(x=>x.id));
+  await safeListUpdate('siswa-list', 'siswaList', list=>{
+    list.forEach(x=>{
+      if(!eligIds.has(x.id)) return;
+      if(on){
+        const room = x[cfg.overrideField] || x[cfg.roomField];
+        if(room){ x[cfg.overrideField] = room; x[cfg.permField] = true; }
+      }else{
+        x[cfg.permField] = false;
+      }
+    });
   });
   await ensureRoomsBothPrograms();
   admSiswa.sel.clear();
@@ -4469,8 +4777,8 @@ async function admBulkApply(field, val){
     list.forEach(s=>{
       if(!ids.has(s.id)) return;
       s[field] = newVal;
-      if(field === 'tilawati'){ s.roomOverride = ''; s.assignedRoom = ''; s.assignedLevel = ''; }
-      if(field === 'tahfidz'){ s.tahfidzRoomOverride = ''; s.tahfidzAssignedRoom = ''; s.tahfidzAssignedLevel = ''; }
+      if(field === 'tilawati' && !(s.permanen && s.roomOverride)){ s.roomOverride = ''; s.assignedRoom = ''; s.assignedLevel = ''; }
+      if(field === 'tahfidz' && !(s.tahfidzPermanen && s.tahfidzRoomOverride)){ s.tahfidzRoomOverride = ''; s.tahfidzAssignedRoom = ''; s.tahfidzAssignedLevel = ''; }
     });
   });
   await ensureRoomsBothPrograms();
@@ -4493,7 +4801,7 @@ async function admDeleteSelected(){
 }
 function bindAdmSiswaEvents(){
   document.getElementById('admQ').addEventListener('input', (e)=>{ admSiswa.q = e.target.value; admSiswa.page = 1; refreshAdmSiswa(true); });
-  [['admKelas','kelas'],['admTl','tl'],['admTh','th']].forEach(([id,key])=>{
+  [['admKelas','kelas'],['admTl','tl'],['admTh','th'],['admPerm','perm']].forEach(([id,key])=>{
     document.getElementById(id).addEventListener('change', (e)=>{ admSiswa[key] = e.target.value; admSiswa.page = 1; refreshAdmSiswa(true); });
   });
   refreshAdmSiswa();
@@ -4964,6 +5272,9 @@ async function startApp(){
     // Jangan biarkan aplikasi macet di layar "Memuat data..." walau
     // penyimpanan gagal total; tetap lanjut pakai data bawaan (seed).
     console.error('Gagal memuat data, memakai data bawaan:', e);
+    dataLoadFailed = true;           // blokir semua penulisan: jangan sampai data contoh menimpa data asli
+    lastSaveAlertAt = Date.now();
+    setTimeout(()=>showAlert('Data gagal dimuat dari server (koneksi/izin bermasalah). Yang tampil hanya data contoh dan semua perubahan DIBLOKIR agar data asli aman. Muat ulang halaman (F5) setelah koneksi normal.'), 300);
     if(!state.siswaList || !state.siswaList.length) state.siswaList = SEED_SISWA.slice();
     if(!state.guruList || !state.guruList.length) state.guruList = SEED_GURU.slice();
     if(!state.roomQuota) state.roomQuota = {};
@@ -4977,6 +5288,7 @@ async function startApp(){
     await ensureAndPersistRoomAssignments();
     render();
     await seedGuruTahfidzFromTilawati();
+    autoDailySnapshot();   // salinan harian otomatis (berjalan di latar belakang)
   }
 }
 
