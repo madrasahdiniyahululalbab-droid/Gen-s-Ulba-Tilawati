@@ -2146,7 +2146,7 @@ function pbHighlight(name, words){
 }
 function renderPembagianBody(){
   const curLevel = activePembagianLevel();
-  const levelObj = activeLevels().find(l=>l.label === curLevel);
+  const levelObj = activeLevels().find(l=>l.label === curLevel) || {kode:''};
   const {rooms, leftover} = assignRooms(curLevel);
   const words = pbWords();
   const searching = words.length > 0;
